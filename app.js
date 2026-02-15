@@ -45,6 +45,11 @@ const state = {
   mutationStrength: 1,
   lastUiDraw: 0,
   startedAt: 0,
+  cachedScaledRects: null,
+  rectsVersion: 0,
+  chartMin: Infinity,
+  chartMax: -Infinity,
+  cachedApproxData: null,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -127,12 +132,13 @@ function randomRect(settings, smart = false) {
   let x = rand(0, state.evalW), y = rand(0, state.evalH);
   if (smart && state.rects.length > 0) {
     let best = null;
+    const currentData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
     for (let i = 0; i < 40; i++) {
       const tx = randi(state.evalW), ty = randi(state.evalH);
       const idx = (ty * state.evalW + tx) * 4;
-      const approx = evalCtx.getImageData(tx, ty, 1, 1).data;
       const tr = state.evalTargetData[idx], tg = state.evalTargetData[idx + 1], tb = state.evalTargetData[idx + 2];
-      const e = Math.abs(tr - approx[0]) + Math.abs(tg - approx[1]) + Math.abs(tb - approx[2]);
+      const ar = currentData[idx], ag = currentData[idx + 1], ab = currentData[idx + 2];
+      const e = Math.abs(tr - ar) + Math.abs(tg - ag) + Math.abs(tb - ab);
       if (!best || e > best.e) best = { tx, ty, e };
     }
     if (best) { x = best.tx; y = best.ty; }
@@ -190,14 +196,18 @@ function mutateRect(rect, settings) {
   return next;
 }
 
-function rescaleRectsToDisplay(rects) {
+function rescaleRectsToDisplay(rects, forceRecalc = false) {
+  if (!forceRecalc && state.cachedScaledRects && state.cachedScaledRects.length === rects.length) {
+    return state.cachedScaledRects;
+  }
   const sx = state.width / state.evalW;
   const sy = state.height / state.evalH;
-  return rects.map((r) => ({ ...r, x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy }));
+  state.cachedScaledRects = rects.map((r) => ({ ...r, x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy }));
+  return state.cachedScaledRects;
 }
 
 function rebuildBestCanvas() {
-  const scaled = rescaleRectsToDisplay(state.bestRects);
+  const scaled = rescaleRectsToDisplay(state.bestRects, true);
   drawScene(bestCtx, scaled, state.width, state.height);
 }
 
@@ -206,11 +216,15 @@ function updateUi(force = false) {
   if (!force && now - state.lastUiDraw < 65) return;
   state.lastUiDraw = now;
 
-  drawScene(actx, rescaleRectsToDisplay(state.rects), state.width, state.height);
+  const scaledRects = rescaleRectsToDisplay(state.rects);
+  drawScene(actx, scaledRects, state.width, state.height);
   const showDiff = ui.showDiff.checked;
   diffCanvas.classList.toggle("hidden", !showDiff);
   if (showDiff) {
-    const approx = actx.getImageData(0, 0, state.width, state.height).data;
+    if (!state.cachedApproxData || force) {
+      state.cachedApproxData = actx.getImageData(0, 0, state.width, state.height).data;
+    }
+    const approx = state.cachedApproxData;
     const diff = dctx.createImageData(state.width, state.height);
     for (let i = 0; i < diff.data.length; i += 4) {
       diff.data[i] = clamp(Math.abs(state.targetData[i] - approx[i]) * 4, 0, 255);
@@ -239,8 +253,23 @@ function updateUi(force = false) {
     .map(([k, v]) => `<div class="stat">${k}<br><b>${v}</b></div>`)
     .join("");
 
-  state.chart.push({ cur: state.mse, best: state.bestMse });
-  if (state.chart.length > 240) state.chart.shift();
+  const curMse = state.mse;
+  const bestMse = state.bestMse;
+  state.chart.push({ cur: curMse, best: bestMse });
+  if (state.chart.length > 240) {
+    const removed = state.chart.shift();
+    if (removed.cur === state.chartMin || removed.cur === state.chartMax || removed.best === state.chartMin || removed.best === state.chartMax) {
+      state.chartMin = Infinity;
+      state.chartMax = -Infinity;
+      state.chart.forEach(p => {
+        state.chartMin = Math.min(state.chartMin, p.cur, p.best);
+        state.chartMax = Math.max(state.chartMax, p.cur, p.best);
+      });
+    }
+  } else {
+    state.chartMin = Math.min(state.chartMin, curMse, bestMse);
+    state.chartMax = Math.max(state.chartMax, curMse, bestMse);
+  }
   renderChart();
 }
 
@@ -250,8 +279,7 @@ function renderChart() {
   cctx.fillStyle = "#0f141f";
   cctx.fillRect(0, 0, w, h);
   if (state.chart.length < 2) return;
-  const vals = state.chart.flatMap((x) => [x.cur, x.best]);
-  const min = Math.min(...vals), max = Math.max(...vals);
+  const min = state.chartMin, max = state.chartMax;
   const span = Math.max(1e-6, max - min);
   const drawLine = (key, color) => {
     cctx.strokeStyle = color;
@@ -274,6 +302,10 @@ function resetOptimizer() {
   const settings = readSettings();
   state.mutationStrength = settings.mutationStrength;
   state.rects = [];
+  state.cachedScaledRects = null;
+  state.cachedApproxData = null;
+  state.chartMin = Infinity;
+  state.chartMax = -Infinity;
   drawScene(evalCtx, [], state.evalW, state.evalH);
   for (let i = 0; i < settings.rectCount; i++) {
     state.rects.push(randomRect(settings, settings.smartInit));
@@ -281,7 +313,10 @@ function resetOptimizer() {
   }
   state.mse = evaluateCurrent();
   state.bestMse = state.mse;
-  state.bestRects = state.rects.map((r) => ({ ...r }));
+  state.bestRects = new Array(state.rects.length);
+  for (let i = 0; i < state.rects.length; i++) {
+    state.bestRects[i] = { ...state.rects[i] };
+  }
   state.iterations = 0;
   state.accepted = 0;
   state.worseAccepted = 0;
@@ -317,9 +352,16 @@ function optimizerStep() {
       state.acceptWindow.push(1);
       if (candMse < state.bestMse) {
         state.bestMse = candMse;
-        state.bestRects = state.rects.map((r) => ({ ...r }));
+        if (state.bestRects.length !== state.rects.length) {
+          state.bestRects = new Array(state.rects.length);
+        }
+        for (let i = 0; i < state.rects.length; i++) {
+          state.bestRects[i] = { ...state.rects[i] };
+        }
         rebuildBestCanvas();
       }
+      state.cachedScaledRects = null;
+      state.cachedApproxData = null;
     } else {
       state.rects[idx] = old;
       state.acceptWindow.push(0);
