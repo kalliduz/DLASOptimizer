@@ -509,7 +509,8 @@ class DLASOptimizer {
         } else if (allowRotation) {
             // Rotation
             rect.angle += (Math.random() - 0.5) * Math.PI * strength;
-            rect.angle = rect.angle % (Math.PI * 2);
+            // Normalize angle to [0, 2π]
+            rect.angle = ((rect.angle % (Math.PI * 2)) + (Math.PI * 2)) % (Math.PI * 2);
         }
     }
 

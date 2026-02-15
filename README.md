@@ -107,7 +107,7 @@ Requires a modern browser with:
 - HTML5 Canvas API
 - ES6+ JavaScript
 - FileReader API
-- Chart.js (loaded via CDN)
+- No external dependencies required
 
 Tested on:
 - Chrome/Edge 90+
