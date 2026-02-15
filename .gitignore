@@ -1,0 +1,13 @@
+# Test files
+*.log
+test*.png
+
+# Screenshots directory
+screenshots/
+
+# Node modules (if any dependencies are added)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
