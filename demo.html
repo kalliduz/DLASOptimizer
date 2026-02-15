@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DLAS Demo - Auto Load Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .demo-box {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #667eea;
+        }
+        canvas {
+            border: 2px solid #ddd;
+            margin: 20px 0;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-box">
+        <h1>🎨 DLAS Image Optimizer Demo</h1>
+        <p>This demo creates a test image with colorful shapes and demonstrates the optimizer.</p>
+        
+        <h3>Test Image:</h3>
+        <canvas id="testCanvas" width="200" height="200"></canvas>
+        
+        <div class="info">
+            <strong>✅ Demo Setup Complete!</strong>
+            <p>The test image has been created. You can right-click and save this image, then upload it to the main optimizer at <a href="index.html">index.html</a> to see it in action.</p>
+            <p><strong>Tip:</strong> Try these settings for best results:</p>
+            <ul>
+                <li>Rectangle Count: 50-100</li>
+                <li>Max Size: 50-80px</li>
+                <li>DLAS History Length: 100</li>
+                <li>Enable: Smart Init and Color from Target</li>
+            </ul>
+        </div>
+        
+        <a href="index.html" style="display: inline-block; margin-top: 20px; padding: 12px 24px; background: #667eea; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
+            → Open Main Optimizer
+        </a>
+    </div>
+    
+    <script>
+        // Create test image
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // White background
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, 200, 200);
+        
+        // Red rectangle
+        ctx.fillStyle = 'red';
+        ctx.fillRect(20, 20, 60, 60);
+        
+        // Blue circle
+        ctx.fillStyle = 'blue';
+        ctx.beginPath();
+        ctx.arc(135, 65, 35, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Green triangle
+        ctx.fillStyle = 'green';
+        ctx.beginPath();
+        ctx.moveTo(100, 120);
+        ctx.lineTo(150, 180);
+        ctx.lineTo(50, 180);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Yellow star
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath();
+        const centerX = 50, centerY = 150;
+        const points = 5, radius = 20, innerRadius = 10;
+        for (let i = 0; i < points * 2; i++) {
+            const r = i % 2 === 0 ? radius : innerRadius;
+            const angle = (Math.PI / points) * i;
+            const x = centerX + r * Math.sin(angle);
+            const y = centerY - r * Math.cos(angle);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+    </script>
+</body>
+</html>
