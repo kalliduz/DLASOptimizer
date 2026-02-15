@@ -221,9 +221,7 @@ function updateUi(force = false) {
   const showDiff = ui.showDiff.checked;
   diffCanvas.classList.toggle("hidden", !showDiff);
   if (showDiff) {
-    if (!state.cachedApproxData || force) {
-      state.cachedApproxData = actx.getImageData(0, 0, state.width, state.height).data;
-    }
+    state.cachedApproxData = actx.getImageData(0, 0, state.width, state.height).data;
     const approx = state.cachedApproxData;
     const diff = dctx.createImageData(state.width, state.height);
     for (let i = 0; i < diff.data.length; i += 4) {
@@ -361,7 +359,6 @@ function optimizerStep() {
         rebuildBestCanvas();
       }
       state.cachedScaledRects = null;
-      state.cachedApproxData = null;
     } else {
       state.rects[idx] = old;
       state.acceptWindow.push(0);

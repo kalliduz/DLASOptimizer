@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head><title>Create Test Image</title></head>
+<body>
+<canvas id="c" width="200" height="200"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = 'white';
+ctx.fillRect(0, 0, 200, 200);
+ctx.fillStyle = 'red';
+ctx.fillRect(20, 20, 60, 60);
+ctx.fillStyle = 'blue';
+ctx.fillRect(120, 120, 60, 60);
+ctx.fillStyle = 'green';
+ctx.beginPath();
+ctx.arc(110, 110, 30, 0, 2 * Math.PI);
+ctx.fill();
+canvas.toBlob(blob => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'test_image.png';
+  a.click();
+});
+</script>
+</body>
+</html>
