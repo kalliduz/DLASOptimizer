@@ -762,5 +762,5 @@ class DLASOptimizer {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-    new DLASOptimizer();
+    window.optimizer = new DLASOptimizer();
 });
