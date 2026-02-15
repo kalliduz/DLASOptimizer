@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DLAS Image Optimizer - Rectangle Approximation</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 DLAS Image Optimizer</h1>
+            <p class="subtitle">Approximate images using semi-transparent colored rectangles</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Left Panel: Controls -->
+            <aside class="controls-panel">
+                <section class="control-group">
+                    <h3>📁 Image Upload</h3>
+                    <input type="file" id="imageUpload" accept="image/*">
+                </section>
+
+                <section class="control-group">
+                    <h3>⚙️ Rectangle Settings</h3>
+                    
+                    <label>
+                        Rectangle Count: <span id="rectCountValue">100</span>
+                        <input type="range" id="rectCount" min="10" max="5000" value="100" step="10">
+                    </label>
+
+                    <label>
+                        Min Size: <span id="minSizeValue">5</span>px
+                        <input type="range" id="minSize" min="1" max="50" value="5">
+                    </label>
+
+                    <label>
+                        Max Size: <span id="maxSizeValue">50</span>px
+                        <input type="range" id="maxSize" min="10" max="200" value="50">
+                    </label>
+
+                    <label>
+                        Min Alpha: <span id="minAlphaValue">0.1</span>
+                        <input type="range" id="minAlpha" min="0" max="1" value="0.1" step="0.01">
+                    </label>
+
+                    <label>
+                        Max Alpha: <span id="maxAlphaValue">0.5</span>
+                        <input type="range" id="maxAlpha" min="0" max="1" value="0.5" step="0.01">
+                    </label>
+                </section>
+
+                <section class="control-group">
+                    <h3>🔬 Optimization Settings</h3>
+                    
+                    <label>
+                        Mutations per Iteration: <span id="mutationsValue">10</span>
+                        <input type="range" id="mutations" min="1" max="100" value="10">
+                    </label>
+
+                    <label>
+                        Mutation Strength: <span id="mutationStrengthValue">0.1</span>
+                        <input type="range" id="mutationStrength" min="0.01" max="1" value="0.1" step="0.01">
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoAdapt">
+                        Auto-Adapt Strength
+                    </label>
+
+                    <label>
+                        DLAS History Length: <span id="historyLengthValue">100</span>
+                        <input type="range" id="historyLength" min="10" max="1000" value="100" step="10">
+                    </label>
+
+                    <label>
+                        Compute Budget (ms/frame): <span id="computeBudgetValue">30</span>
+                        <input type="range" id="computeBudget" min="5" max="100" value="30" step="5">
+                    </label>
+                </section>
+
+                <section class="control-group">
+                    <h3>🎨 Advanced Options</h3>
+                    
+                    <label>
+                        Background Mode:
+                        <select id="backgroundMode">
+                            <option value="average">Average Color</option>
+                            <option value="median">Median Color</option>
+                            <option value="black">Black</option>
+                            <option value="white">White</option>
+                        </select>
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="smartInit" checked>
+                        Smart Init (Greedy)
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="colorFromTarget" checked>
+                        Color from Target
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="allowRotation">
+                        Allow Rotation
+                    </label>
+
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="showDiffMap">
+                        Show Diff Map
+                    </label>
+                </section>
+
+                <section class="control-group actions">
+                    <button id="startBtn" class="btn btn-primary">▶️ Start</button>
+                    <button id="pauseBtn" class="btn btn-secondary" disabled>⏸️ Pause</button>
+                    <button id="resetBtn" class="btn btn-warning">🔄 Reset</button>
+                    <button id="exportBtn" class="btn btn-success">💾 Export Best</button>
+                </section>
+            </aside>
+
+            <!-- Right Panel: Display -->
+            <main class="display-panel">
+                <div class="canvas-grid">
+                    <div class="canvas-wrapper">
+                        <h4>Original Image</h4>
+                        <canvas id="originalCanvas"></canvas>
+                    </div>
+                    <div class="canvas-wrapper">
+                        <h4>Approximation <span class="activity-indicator" id="activityIndicator"></span></h4>
+                        <canvas id="approximationCanvas"></canvas>
+                    </div>
+                </div>
+
+                <div class="diff-canvas-wrapper" id="diffCanvasWrapper" style="display: none;">
+                    <h4>Difference Map (×4 amplified)</h4>
+                    <canvas id="diffCanvas"></canvas>
+                </div>
+
+                <div class="stats-panel">
+                    <h4>📊 Statistics</h4>
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <span class="stat-label">Iterations:</span>
+                            <span class="stat-value" id="statIterations">0</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Iter/sec:</span>
+                            <span class="stat-value" id="statIterPerSec">0</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Current MSE:</span>
+                            <span class="stat-value" id="statCurrentMSE">-</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Best MSE:</span>
+                            <span class="stat-value" id="statBestMSE">-</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Similarity:</span>
+                            <span class="stat-value" id="statSimilarity">0%</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Accept Rate:</span>
+                            <span class="stat-value" id="statAcceptRate">0%</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Worse Accepted:</span>
+                            <span class="stat-value" id="statWorseAccepted">0</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Mutation Strength:</span>
+                            <span class="stat-value" id="statMutationStrength">0.10</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-panel">
+                    <h4>📈 MSE History</h4>
+                    <canvas id="mseChart"></canvas>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
