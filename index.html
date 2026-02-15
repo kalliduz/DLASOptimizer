@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DLAS Rectangle Approximator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main>
+    <h1>DLAS Rectangle Image Approximator</h1>
+    <section class="controls">
+      <div class="control-group">
+        <label>Upload image <input id="imageUpload" type="file" accept="image/*" /></label>
+        <button id="startBtn" disabled>Start</button>
+        <button id="pauseBtn" disabled>Pause</button>
+        <button id="resetBtn" disabled>Reset</button>
+        <button id="exportBtn" disabled>Export Best PNG</button>
+      </div>
+
+      <div class="grid">
+        <label>Rectangles <input id="rectCount" type="number" min="10" max="5000" value="160" /></label>
+        <label>Min Size (px) <input id="minSize" type="number" min="1" max="400" value="4" /></label>
+        <label>Max Size (px) <input id="maxSize" type="number" min="1" max="400" value="48" /></label>
+        <label>Min Alpha (0-1) <input id="minAlpha" type="number" min="0" max="1" step="0.01" value="0.08" /></label>
+        <label>Max Alpha (0-1) <input id="maxAlpha" type="number" min="0" max="1" step="0.01" value="0.45" /></label>
+        <label>Mutations / frame <input id="mutPerIter" type="number" min="1" max="10000" value="800" /></label>
+        <label>Mutation Strength <input id="mutationStrength" type="number" min="0.1" max="4" step="0.05" value="1" /></label>
+        <label><input id="autoAdapt" type="checkbox" checked /> Auto-adapt strength</label>
+        <label>DLAS history length <input id="dlasHistory" type="number" min="5" max="50000" value="1000" /></label>
+        <label>Compute budget (ms/frame) <input id="computeBudget" type="number" min="1" max="40" value="8" /></label>
+        <label>Background
+          <select id="bgMode">
+            <option value="average">Average</option>
+            <option value="median">Median</option>
+            <option value="black">Black</option>
+            <option value="white">White</option>
+          </select>
+        </label>
+        <label><input id="smartInit" type="checkbox" checked /> Smart Init (Greedy)</label>
+        <label><input id="colorFromTarget" type="checkbox" checked /> Color from Target</label>
+        <label><input id="allowRotation" type="checkbox" /> Allow Rotation</label>
+        <label><input id="showDiff" type="checkbox" checked /> Show Diff Map</label>
+      </div>
+    </section>
+
+    <section class="canvases">
+      <figure>
+        <figcaption>Original</figcaption>
+        <canvas id="originalCanvas"></canvas>
+      </figure>
+      <figure>
+        <figcaption>Approximation <span id="runningDot" class="dot idle"></span></figcaption>
+        <canvas id="approxCanvas"></canvas>
+      </figure>
+      <figure>
+        <figcaption>Diff ×4</figcaption>
+        <canvas id="diffCanvas"></canvas>
+      </figure>
+    </section>
+
+    <section class="stats">
+      <div id="statsPanel"></div>
+      <canvas id="mseChart" width="720" height="220"></canvas>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
