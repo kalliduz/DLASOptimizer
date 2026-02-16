@@ -44,6 +44,8 @@ const state = {
   chart: [],
   dlasHistory: [],
   dlasIndex: 0,
+  dlasMax: Infinity,
+  dlasMaxCount: 0,
   mutationStrength: 1,
   lastUiDraw: 0,
   startedAt: 0,
@@ -59,6 +61,11 @@ const state = {
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const randi = (n) => Math.floor(Math.random() * n);
 const rand = (a, b) => a + Math.random() * (b - a);
+const EPS = 1e-12;
+
+function almostEqual(a, b) {
+  return Math.abs(a - b) <= EPS;
+}
 
 function readSettings() {
   return {
@@ -400,6 +407,42 @@ function renderChart() {
   drawLine("best", "#f6c36b");
 }
 
+function recalcDlasMax() {
+  let max = -Infinity;
+  let count = 0;
+  for (let i = 0; i < state.dlasHistory.length; i++) {
+    const v = state.dlasHistory[i];
+    if (v > max) {
+      max = v;
+      count = 1;
+    } else if (almostEqual(v, max)) {
+      count++;
+    }
+  }
+  state.dlasMax = max;
+  state.dlasMaxCount = count;
+}
+
+function replaceDlasHistory(index, value) {
+  const old = state.dlasHistory[index];
+  if (almostEqual(old, value)) return;
+  if (almostEqual(old, state.dlasMax)) {
+    state.dlasMaxCount--;
+  }
+
+  state.dlasHistory[index] = value;
+  if (value > state.dlasMax) {
+    state.dlasMax = value;
+    state.dlasMaxCount = 1;
+    return;
+  }
+  if (almostEqual(value, state.dlasMax)) {
+    state.dlasMaxCount++;
+    return;
+  }
+  if (state.dlasMaxCount <= 0) recalcDlasMax();
+}
+
 function resetOptimizer() {
   state.running = false;
   ui.runningDot.className = "dot idle";
@@ -430,6 +473,8 @@ function resetOptimizer() {
   state.chart = [];
   state.dlasHistory = new Array(settings.dlasHistory).fill(state.mse);
   state.dlasIndex = 0;
+  state.dlasMax = state.mse;
+  state.dlasMaxCount = state.dlasHistory.length;
   state.startedAt = performance.now();
   rebuildBestCanvas();
   updateUi(true);
@@ -448,8 +493,8 @@ function optimizerStep() {
 
     const delta = evalMutationDelta(old, next);
     const candMse = mseFromErrSum(delta.nextErrSum);
-    const dlasThreshold = state.dlasHistory[state.dlasIndex];
-    const accept = candMse <= state.mse || candMse <= dlasThreshold;
+    const prevMse = state.mse;
+    const accept = almostEqual(candMse, prevMse) || candMse < state.dlasMax;
     state.iterations++;
 
     if (accept) {
@@ -475,7 +520,11 @@ function optimizerStep() {
       state.acceptWindow.push(0);
     }
 
-    state.dlasHistory[state.dlasIndex] = state.mse;
+    const historyValue = state.dlasHistory[state.dlasIndex];
+    const shouldReplace =
+      state.mse > historyValue ||
+      (state.mse < historyValue && state.mse + EPS < prevMse);
+    if (shouldReplace) replaceDlasHistory(state.dlasIndex, state.mse);
     state.dlasIndex = (state.dlasIndex + 1) % state.dlasHistory.length;
     if (state.acceptWindow.length > 250) state.acceptWindow.shift();
   }
