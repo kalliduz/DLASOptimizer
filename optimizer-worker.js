@@ -96,8 +96,10 @@ function createRenderer(canvas) {
 
   return {
     drawScene(rects, w, h, bg, offsetX = 0, offsetY = 0, region = null) {
-      canvas.width = w;
-      canvas.height = h;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
       gl.viewport(0, 0, w, h);
       gl.useProgram(program);
       gl.uniform2f(uResolution, w, h);
