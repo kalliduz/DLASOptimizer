@@ -1,6 +1,6 @@
 # DLAS Rectangle Image Approximator
 
-A web-based tool that approximates images using layered semi-transparent rectangles, powered by a Dynamic Late Acceptance Search (DLAS) optimizer.
+A web-based tool that approximates images using layered semi-transparent rectangles, powered by a Diversified Late Acceptance Search (DLAS) optimizer.
 
 ## Features
 
@@ -39,10 +39,10 @@ A web-based tool that approximates images using layered semi-transparent rectang
 
 ## How It Works
 
-The DLAS optimizer uses a late-acceptance hill-climbing algorithm:
-- Maintains a history buffer of previous solution quality scores
-- Accepts worse solutions if they're better than historical values
-- This helps escape local minima while still converging to good solutions
+The DLAS optimizer uses diversified late acceptance search:
+- Maintains a circular history of previous solution quality scores
+- Accepts candidates if they are sideways moves or better than the history maximum
+- Uses selective history replacement to keep diversity and avoid degenerating to plain hill climbing
 - Auto-adapts mutation strength based on acceptance rate
 
 ## Technical Details
