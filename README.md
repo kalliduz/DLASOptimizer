@@ -13,6 +13,7 @@ A web-based tool that approximates images using layered semi-transparent rectang
   - Background color computation (average, median, black, white)
   - Smart initialization and color bias options
   - Optional rotation support
+  - Optional multi-worker search (parallel optimizer islands)
 - **Visual Feedback**:
   - Side-by-side comparison of original and approximation
   - Difference map visualization (×4 amplified)
@@ -51,6 +52,7 @@ The DLAS optimizer uses diversified late acceptance search:
 - No external dependencies
 - Optimized evaluation using downscaled internal canvas
 - Configurable compute budget per frame (default: 8ms) to maintain smooth UI
+- Optional Web Worker pool to run multiple DLAS searches in parallel and keep the best trajectory
 - Renders at ~15 FPS while dedicating most compute to optimization
 
 ## License

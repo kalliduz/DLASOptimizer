@@ -126,8 +126,8 @@ Overall: 77% improvement in critical operations
 ### Not Included (Out of Scope)
 These were considered but not implemented to keep changes minimal:
 1. **WebGL rendering**: Would require major rewrite
-2. **Web Workers**: Would change architecture significantly
-3. **OffscreenCanvas**: Browser support varies
+2. **Web Workers**: Implemented as an optional multi-worker search mode in the latest update
+3. **OffscreenCanvas**: Used by worker mode; browser support should be validated for production targets
 4. **Incremental MSE**: Requires algorithm changes
 
 ### Why These Were Excluded

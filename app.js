@@ -4,7 +4,7 @@ const ui = {
   rectCount: $("rectCount"), minSize: $("minSize"), maxSize: $("maxSize"), minAlpha: $("minAlpha"), maxAlpha: $("maxAlpha"),
   mutPerIter: $("mutPerIter"), mutationStrength: $("mutationStrength"), autoAdapt: $("autoAdapt"), dlasHistory: $("dlasHistory"),
   computeBudget: $("computeBudget"), bgMode: $("bgMode"), smartInit: $("smartInit"), colorFromTarget: $("colorFromTarget"),
-  allowRotation: $("allowRotation"), showDiff: $("showDiff"), runningDot: $("runningDot"), statsPanel: $("statsPanel")
+  allowRotation: $("allowRotation"), multiWorker: $("multiWorker"), workerCount: $("workerCount"), showDiff: $("showDiff"), runningDot: $("runningDot"), statsPanel: $("statsPanel")
 };
 
 const originalCanvas = $("originalCanvas");
@@ -56,6 +56,10 @@ const state = {
   cachedApproxData: null,
   evalRenderData: null,
   currentErrSum: Infinity,
+  workerPool: [],
+  workerStats: [],
+  workerBest: null,
+  workerTimer: null,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -83,6 +87,8 @@ function readSettings() {
     smartInit: ui.smartInit.checked,
     colorFromTarget: ui.colorFromTarget.checked,
     allowRotation: ui.allowRotation.checked,
+    multiWorker: ui.multiWorker.checked,
+    workerCount: clamp(parseInt(ui.workerCount.value, 10) || 4, 1, 16),
     showDiff: ui.showDiff.checked,
   };
 }
@@ -348,8 +354,11 @@ function updateUi(force = false) {
 
   const elapsed = (performance.now() - state.startedAt) / 1000;
   const ips = elapsed > 0 ? Math.round(state.iterations / elapsed) : 0;
-  const accRate = state.acceptWindow.length ? (state.acceptWindow.reduce((a, b) => a + b, 0) / state.acceptWindow.length) * 100 : 0;
+  const accRate = state.acceptWindow.length
+    ? (state.acceptWindow.reduce((a, b) => a + b, 0) / state.acceptWindow.length) * 100
+    : (state.iterations ? (state.accepted / state.iterations) * 100 : 0);
   const sim = Math.max(0, 100 * (1 - state.bestMse / (255 * 255)));
+  const settings = readSettings();
   const stats = {
     Iterations: state.iterations.toLocaleString(),
     "Iterations/sec": ips.toLocaleString(),
@@ -359,6 +368,7 @@ function updateUi(force = false) {
     "Acceptance %": accRate.toFixed(2),
     "Worse accepted": state.worseAccepted.toLocaleString(),
     "Mutation strength": state.mutationStrength.toFixed(2),
+    "Mode": settings.multiWorker ? `Workers (${state.workerPool.length || settings.workerCount})` : "Single thread",
   };
   ui.statsPanel.innerHTML = Object.entries(stats)
     .map(([k, v]) => `<div class="stat">${k}<br><b>${v}</b></div>`)
@@ -444,6 +454,7 @@ function replaceDlasHistory(index, value) {
 }
 
 function resetOptimizer() {
+  stopWorkerMode();
   state.running = false;
   ui.runningDot.className = "dot idle";
   const settings = readSettings();
@@ -480,9 +491,92 @@ function resetOptimizer() {
   updateUi(true);
 }
 
+
+function stopWorkerMode() {
+  if (state.workerTimer) {
+    clearInterval(state.workerTimer);
+    state.workerTimer = null;
+  }
+  for (const worker of state.workerPool) worker.terminate();
+  state.workerPool = [];
+  state.workerStats = [];
+  state.workerBest = null;
+}
+
+function collectWorkerStats() {
+  if (!state.workerStats.length) return;
+  let best = null;
+  let iterations = 0;
+  let accepted = 0;
+  for (const stats of state.workerStats) {
+    if (!stats) continue;
+    iterations += stats.iterations || 0;
+    accepted += stats.accepted || 0;
+    if (!best || stats.bestMse < best.bestMse) best = stats;
+  }
+  if (!best) return;
+  state.iterations = iterations;
+  state.accepted = accepted;
+  state.mse = best.mse;
+  state.bestMse = best.bestMse;
+  if (!state.workerBest || best.bestMse + EPS < state.workerBest.bestMse) {
+    state.workerBest = best;
+    state.rects = best.rects.map((r) => ({ ...r }));
+    state.bestRects = best.bestRects.map((r) => ({ ...r }));
+    state.cachedScaledRects = null;
+    rebuildBestCanvas();
+  }
+}
+
+function startWorkerMode(settings) {
+  stopWorkerMode();
+  const workerCount = Math.min(settings.workerCount, navigator.hardwareConcurrency || settings.workerCount);
+  state.workerStats = new Array(workerCount).fill(null);
+  state.iterations = 0;
+  state.accepted = 0;
+  state.worseAccepted = 0;
+  state.acceptWindow = [];
+  state.chart = [];
+  state.chartMin = Infinity;
+  state.chartMax = -Infinity;
+  state.startedAt = performance.now();
+
+  for (let i = 0; i < workerCount; i++) {
+    const worker = new Worker('optimizer-worker.js', { type: 'module' });
+    worker.onmessage = (event) => {
+      const msg = event.data;
+      if (msg.type === 'stats') {
+        state.workerStats[msg.id] = msg.payload;
+      }
+    };
+    worker.postMessage({
+      type: 'init',
+      id: i,
+      payload: {
+        settings,
+        evalW: state.evalW,
+        evalH: state.evalH,
+        width: state.width,
+        height: state.height,
+        targetData: state.evalTargetData,
+        bg: state.bg,
+      },
+    });
+    worker.postMessage({ type: 'start' });
+    state.workerPool.push(worker);
+  }
+
+  state.workerTimer = setInterval(() => {
+    if (!state.running) return;
+    collectWorkerStats();
+    updateUi();
+  }, 80);
+}
+
 function optimizerStep() {
   if (!state.running) return;
   const settings = readSettings();
+  if (settings.multiWorker) return;
   const frameStart = performance.now();
   for (let outer = 0; outer < settings.mutPerIter; outer++) {
     if (performance.now() - frameStart > settings.computeBudget) break;
@@ -583,10 +677,12 @@ ui.startBtn.addEventListener("click", () => {
   if (!state.running) {
     state.running = true;
     ui.runningDot.className = "dot running";
-    optimizerStep();
+    const settings = readSettings();
+    if (settings.multiWorker) startWorkerMode(settings);
+    else optimizerStep();
   }
 });
-ui.pauseBtn.addEventListener("click", () => { state.running = false; ui.runningDot.className = "dot idle"; updateUi(true); });
+ui.pauseBtn.addEventListener("click", () => { state.running = false; stopWorkerMode(); ui.runningDot.className = "dot idle"; updateUi(true); });
 ui.resetBtn.addEventListener("click", () => {
   if (!state.targetData) return;
   state.bg = computeBackground(readSettings().bgMode, state.targetData);
