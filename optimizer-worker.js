@@ -27,6 +27,7 @@ const state = {
   mutationStrength: 1,
   lastReport: 0,
   acceptWindow: [],
+  lastSentBestMse: Infinity,
 };
 
 const evalCanvas = new OffscreenCanvas(1, 1);
@@ -305,6 +306,7 @@ function resetOptimizer() {
   state.dlasIndex = 0;
   state.dlasMax = state.mse;
   state.dlasMaxCount = state.dlasHistory.length;
+  state.lastSentBestMse = Infinity;
 }
 
 function optimizationSlice() {
@@ -359,20 +361,20 @@ function optimizationSlice() {
   const now = performance.now();
   if (now - state.lastReport > 120) {
     state.lastReport = now;
-    postMessage({
-      type: 'stats',
-      id: state.id,
-      payload: {
-        mse: state.mse,
-        bestMse: state.bestMse,
-        iterations: state.iterations,
-        accepted: state.accepted,
-        worseAccepted: state.worseAccepted,
-        mutationStrength: state.mutationStrength,
-        rects: state.rects,
-        bestRects: state.bestRects,
-      },
-    });
+    const payload = {
+      mse: state.mse,
+      bestMse: state.bestMse,
+      iterations: state.iterations,
+      accepted: state.accepted,
+      worseAccepted: state.worseAccepted,
+      mutationStrength: state.mutationStrength,
+    };
+    if (state.bestMse + EPS < state.lastSentBestMse) {
+      payload.rects = state.rects;
+      payload.bestRects = state.bestRects;
+      state.lastSentBestMse = state.bestMse;
+    }
+    postMessage({ type: 'stats', id: state.id, payload });
   }
   setTimeout(optimizationSlice, 0);
 }
