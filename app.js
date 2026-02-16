@@ -60,6 +60,8 @@ const state = {
   workerStats: [],
   workerBest: null,
   workerTimer: null,
+  workerSettingsTimer: null,
+  lastWorkerSync: null,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -497,10 +499,15 @@ function stopWorkerMode() {
     clearInterval(state.workerTimer);
     state.workerTimer = null;
   }
+  if (state.workerSettingsTimer) {
+    clearInterval(state.workerSettingsTimer);
+    state.workerSettingsTimer = null;
+  }
   for (const worker of state.workerPool) worker.terminate();
   state.workerPool = [];
   state.workerStats = [];
   state.workerBest = null;
+  state.lastWorkerSync = null;
 }
 
 function collectWorkerStats() {
@@ -508,15 +515,25 @@ function collectWorkerStats() {
   let best = null;
   let iterations = 0;
   let accepted = 0;
+  let worseAccepted = 0;
+  let mutationTotal = 0;
+  let mutationContributors = 0;
   for (const stats of state.workerStats) {
     if (!stats) continue;
     iterations += stats.iterations || 0;
     accepted += stats.accepted || 0;
+    worseAccepted += stats.worseAccepted || 0;
+    if (Number.isFinite(stats.mutationStrength)) {
+      mutationTotal += stats.mutationStrength;
+      mutationContributors++;
+    }
     if (!best || stats.bestMse < best.bestMse) best = stats;
   }
   if (!best) return;
   state.iterations = iterations;
   state.accepted = accepted;
+  state.worseAccepted = worseAccepted;
+  if (mutationContributors > 0) state.mutationStrength = mutationTotal / mutationContributors;
   state.mse = best.mse;
   state.bestMse = best.bestMse;
   if (!state.workerBest || best.bestMse + EPS < state.workerBest.bestMse) {
@@ -525,6 +542,48 @@ function collectWorkerStats() {
     state.bestRects = best.bestRects.map((r) => ({ ...r }));
     state.cachedScaledRects = null;
     rebuildBestCanvas();
+  }
+}
+
+function workerSyncSnapshot(settings) {
+  return {
+    mutationStrength: settings.mutationStrength,
+    autoAdapt: settings.autoAdapt,
+    computeBudget: settings.computeBudget,
+    mutPerIter: settings.mutPerIter,
+    dlasHistory: settings.dlasHistory,
+  };
+}
+
+function syncWorkersWithUi(force = false) {
+  if (!state.workerPool.length) return;
+  const settings = readSettings();
+  const snapshot = workerSyncSnapshot(settings);
+  if (!force && state.lastWorkerSync) {
+    const unchanged = Object.keys(snapshot).every((k) => {
+      if (typeof snapshot[k] === 'boolean') return snapshot[k] === state.lastWorkerSync[k];
+      return almostEqual(snapshot[k], state.lastWorkerSync[k]);
+    });
+    if (unchanged) return;
+  }
+  state.lastWorkerSync = snapshot;
+  for (const worker of state.workerPool) {
+    worker.postMessage({ type: 'update-settings', payload: snapshot });
+  }
+}
+
+function migrateBestSolution() {
+  if (!state.workerPool.length || !state.workerBest) return;
+  const elite = {
+    rects: state.workerBest.rects,
+    bestRects: state.workerBest.bestRects,
+    mse: state.workerBest.mse,
+    bestMse: state.workerBest.bestMse,
+  };
+  for (let i = 0; i < state.workerPool.length; i++) {
+    const stats = state.workerStats[i];
+    if (!stats || stats.bestMse <= elite.bestMse + EPS || Math.random() > 0.45) continue;
+    state.workerPool[i].postMessage({ type: 'inject-elite', payload: elite });
   }
 }
 
@@ -540,6 +599,8 @@ function startWorkerMode(settings) {
   state.chartMin = Infinity;
   state.chartMax = -Infinity;
   state.startedAt = performance.now();
+  state.mutationStrength = settings.mutationStrength;
+  state.lastWorkerSync = workerSyncSnapshot(settings);
 
   for (let i = 0; i < workerCount; i++) {
     const worker = new Worker('optimizer-worker.js', { type: 'module' });
@@ -569,8 +630,14 @@ function startWorkerMode(settings) {
   state.workerTimer = setInterval(() => {
     if (!state.running) return;
     collectWorkerStats();
+    migrateBestSolution();
     updateUi();
   }, 80);
+
+  state.workerSettingsTimer = setInterval(() => {
+    if (!state.running) return;
+    syncWorkersWithUi();
+  }, 180);
 }
 
 function optimizerStep() {
