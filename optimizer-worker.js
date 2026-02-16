@@ -321,7 +321,7 @@ function optimizationSlice() {
     const delta = evalMutationDelta(old, next);
     const candMse = mseFromErrSum(delta.nextErrSum);
     const prevMse = state.mse;
-    const accept = almostEqual(candMse, prevMse) || candMse < state.dlasMax;
+    const accept = almostEqual(candMse, prevMse) || candMse <= state.dlasMax + EPS;
     state.iterations++;
 
     if (accept) {
