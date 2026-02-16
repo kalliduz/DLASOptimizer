@@ -12,110 +12,16 @@ const approxCanvas = $("approxCanvas");
 const diffCanvas = $("diffCanvas");
 const chartCanvas = $("mseChart");
 const octx = originalCanvas.getContext("2d", { willReadFrequently: true });
+const actx = approxCanvas.getContext("2d", { willReadFrequently: true });
 const dctx = diffCanvas.getContext("2d", { willReadFrequently: true });
 const cctx = chartCanvas.getContext("2d");
 
 const evalCanvas = document.createElement("canvas");
+const evalCtx = evalCanvas.getContext("2d", { willReadFrequently: true });
 const bestCanvas = document.createElement("canvas");
-
-function createRenderer(canvas, label) {
-  const gl = canvas.getContext("webgl2", { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true })
-    || canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
-  if (!gl) throw new Error(`WebGL unavailable for ${label}`);
-
-  const vs = gl.createShader(gl.VERTEX_SHADER);
-  gl.shaderSource(vs, `
-    attribute vec2 a_pos;
-    uniform vec2 u_resolution;
-    uniform vec2 u_translate;
-    uniform vec2 u_scale;
-    uniform float u_angle;
-    uniform vec2 u_offset;
-    void main() {
-      vec2 p = a_pos * u_scale;
-      float c = cos(u_angle);
-      float s = sin(u_angle);
-      p = vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-      p += u_translate - u_offset;
-      vec2 clip = vec2((p.x / u_resolution.x) * 2.0 - 1.0, 1.0 - (p.y / u_resolution.y) * 2.0);
-      gl_Position = vec4(clip, 0.0, 1.0);
-    }
-  `);
-  gl.compileShader(vs);
-  if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(vs));
-
-  const fs = gl.createShader(gl.FRAGMENT_SHADER);
-  gl.shaderSource(fs, `
-    precision mediump float;
-    uniform vec4 u_color;
-    void main() { gl_FragColor = u_color; }
-  `);
-  gl.compileShader(fs);
-  if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(fs));
-
-  const program = gl.createProgram();
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
-
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]), gl.STATIC_DRAW);
-
-  gl.useProgram(program);
-  const aPos = gl.getAttribLocation(program, "a_pos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-  const uResolution = gl.getUniformLocation(program, "u_resolution");
-  const uTranslate = gl.getUniformLocation(program, "u_translate");
-  const uScale = gl.getUniformLocation(program, "u_scale");
-  const uAngle = gl.getUniformLocation(program, "u_angle");
-  const uColor = gl.getUniformLocation(program, "u_color");
-  const uOffset = gl.getUniformLocation(program, "u_offset");
-
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-  return {
-    canvas,
-    drawScene(rects, w, h, bg, offsetX = 0, offsetY = 0, region = null) {
-      canvas.width = w;
-      canvas.height = h;
-      gl.viewport(0, 0, w, h);
-      gl.useProgram(program);
-      gl.uniform2f(uResolution, w, h);
-      gl.uniform2f(uOffset, offsetX, offsetY);
-      gl.clearColor(bg[0] / 255, bg[1] / 255, bg[2] / 255, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      for (const rect of rects) {
-        if (region && !intersectsRegion(rect, region)) continue;
-        gl.uniform2f(uTranslate, rect.x, rect.y);
-        gl.uniform2f(uScale, rect.w, rect.h);
-        gl.uniform1f(uAngle, rect.angle || 0);
-        gl.uniform4f(uColor, rect.r / 255, rect.g / 255, rect.b / 255, rect.a);
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      }
-    },
-    readPixelsTopDown(w, h) {
-      const raw = new Uint8Array(w * h * 4);
-      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
-      const flipped = new Uint8ClampedArray(raw.length);
-      const row = w * 4;
-      for (let y = 0; y < h; y++) {
-        const src = (h - 1 - y) * row;
-        const dst = y * row;
-        flipped.set(raw.subarray(src, src + row), dst);
-      }
-      return flipped;
-    }
-  };
-}
-
-const evalRenderer = createRenderer(evalCanvas, "evaluator");
-const approxRenderer = createRenderer(approxCanvas, "approximation");
-const bestRenderer = createRenderer(bestCanvas, "best");
+const bestCtx = bestCanvas.getContext("2d");
+const patchCanvas = document.createElement("canvas");
+const patchCtx = patchCanvas.getContext("2d", { willReadFrequently: true });
 
 const state = {
   running: false,
@@ -211,6 +117,33 @@ function computeBackground(mode, data) {
   return [rs[m], gs[m], bs[m]];
 }
 
+function drawRect(ctx, rect) {
+  ctx.save();
+  ctx.translate(rect.x, rect.y);
+  if (rect.angle) ctx.rotate(rect.angle);
+  ctx.fillStyle = `rgba(${rect.r},${rect.g},${rect.b},${rect.a})`;
+  ctx.fillRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
+  ctx.restore();
+}
+
+function drawScene(ctx, rects, w, h) {
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = `rgb(${state.bg[0]},${state.bg[1]},${state.bg[2]})`;
+  ctx.fillRect(0, 0, w, h);
+  for (const rect of rects) drawRect(ctx, rect);
+}
+
+function scoreMse(renderData, targetData) {
+  let err = 0;
+  for (let i = 0; i < targetData.length; i += 4) {
+    const dr = renderData[i] - targetData[i];
+    const dg = renderData[i + 1] - targetData[i + 1];
+    const db = renderData[i + 2] - targetData[i + 2];
+    err += dr * dr + dg * dg + db * db;
+  }
+  return err / ((targetData.length / 4) * 3);
+}
+
 function scoreErrSum(renderData, targetData) {
   let err = 0;
   for (let i = 0; i < targetData.length; i += 4) {
@@ -227,7 +160,7 @@ function mseFromErrSum(errSum) {
 }
 
 function syncEvalRenderData() {
-  state.evalRenderData = evalRenderer.readPixelsTopDown(state.evalW, state.evalH);
+  state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
 }
 
 function rectAabb(rect) {
@@ -257,8 +190,21 @@ function intersectsRegion(rect, region) {
 }
 
 function renderRegion(rects, region) {
-  evalRenderer.drawScene(rects, region.w, region.h, state.bg, region.x0, region.y0, region);
-  return evalRenderer.readPixelsTopDown(region.w, region.h);
+  patchCanvas.width = region.w;
+  patchCanvas.height = region.h;
+  patchCtx.clearRect(0, 0, region.w, region.h);
+  patchCtx.fillStyle = `rgb(${state.bg[0]},${state.bg[1]},${state.bg[2]})`;
+  patchCtx.fillRect(0, 0, region.w, region.h);
+  for (const rect of rects) {
+    if (!intersectsRegion(rect, region)) continue;
+    patchCtx.save();
+    patchCtx.translate(rect.x - region.x0, rect.y - region.y0);
+    if (rect.angle) patchCtx.rotate(rect.angle);
+    patchCtx.fillStyle = `rgba(${rect.r},${rect.g},${rect.b},${rect.a})`;
+    patchCtx.fillRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
+    patchCtx.restore();
+  }
+  return patchCtx.getImageData(0, 0, region.w, region.h).data;
 }
 
 function evalMutationDelta(oldRect, newRect) {
@@ -299,7 +245,7 @@ function applyPatchToEvalData(region, patchData) {
 }
 
 function evaluateCurrent() {
-  evalRenderer.drawScene(state.rects, state.evalW, state.evalH, state.bg);
+  drawScene(evalCtx, state.rects, state.evalW, state.evalH);
   syncEvalRenderData();
   state.currentErrSum = scoreErrSum(state.evalRenderData, state.evalTargetData);
   return mseFromErrSum(state.currentErrSum);
@@ -309,7 +255,7 @@ function randomRect(settings, smart = false) {
   let x = rand(0, state.evalW), y = rand(0, state.evalH);
   if (smart && state.rects.length > 0) {
     let best = null;
-    const currentData = state.evalRenderData || evalRenderer.readPixelsTopDown(state.evalW, state.evalH);
+    const currentData = state.evalRenderData || evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
     for (let i = 0; i < 40; i++) {
       const tx = randi(state.evalW), ty = randi(state.evalH);
       const idx = (ty * state.evalW + tx) * 4;
@@ -387,7 +333,7 @@ function rescaleRectsToDisplay(rects, version, cache, forceRecalc = false) {
 
 function rebuildBestCanvas() {
   const scaled = rescaleRectsToDisplay(state.bestRects, state.bestRectsVersion, state.scaledBestRectsCache);
-  bestRenderer.drawScene(scaled, state.width, state.height, state.bg);
+  drawScene(bestCtx, scaled, state.width, state.height);
 }
 
 function updateUi(force = false) {
@@ -396,11 +342,11 @@ function updateUi(force = false) {
   state.lastUiDraw = now;
 
   const scaledRects = rescaleRectsToDisplay(state.rects, state.rectsVersion, state.scaledRectsCache);
-  approxRenderer.drawScene(scaledRects, state.width, state.height, state.bg);
+  drawScene(actx, scaledRects, state.width, state.height);
   const showDiff = ui.showDiff.checked;
   diffCanvas.classList.toggle("hidden", !showDiff);
   if (showDiff) {
-    state.cachedApproxData = approxRenderer.readPixelsTopDown(state.width, state.height);
+    state.cachedApproxData = actx.getImageData(0, 0, state.width, state.height).data;
     const approx = state.cachedApproxData;
     const diff = dctx.createImageData(state.width, state.height);
     for (let i = 0; i < diff.data.length; i += 4) {
@@ -529,10 +475,10 @@ function resetOptimizer() {
   state.chartMax = -Infinity;
   state.evalRenderData = null;
   state.currentErrSum = Infinity;
-  evalRenderer.drawScene([], state.evalW, state.evalH, state.bg);
+  drawScene(evalCtx, [], state.evalW, state.evalH);
   for (let i = 0; i < settings.rectCount; i++) {
     state.rects.push(randomRect(settings, settings.smartInit));
-    if (settings.smartInit && i % 8 === 0) evalRenderer.drawScene(state.rects, state.evalW, state.evalH, state.bg);
+    if (settings.smartInit && i % 8 === 0) drawScene(evalCtx, state.rects, state.evalW, state.evalH);
   }
   state.mse = evaluateCurrent();
   state.bestMse = state.mse;
@@ -792,12 +738,10 @@ async function loadImage(file) {
   const evalScale = Math.min(1, evalMax / Math.max(state.width, state.height));
   state.evalW = Math.max(8, Math.round(state.width * evalScale));
   state.evalH = Math.max(8, Math.round(state.height * evalScale));
-  const targetEvalCanvas = document.createElement("canvas");
-  targetEvalCanvas.width = state.evalW;
-  targetEvalCanvas.height = state.evalH;
-  const targetEvalCtx = targetEvalCanvas.getContext("2d", { willReadFrequently: true });
-  targetEvalCtx.drawImage(originalCanvas, 0, 0, state.evalW, state.evalH);
-  state.evalTargetData = targetEvalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+  evalCanvas.width = state.evalW;
+  evalCanvas.height = state.evalH;
+  evalCtx.drawImage(originalCanvas, 0, 0, state.evalW, state.evalH);
+  state.evalTargetData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
 
   state.bg = computeBackground(readSettings().bgMode, state.targetData);
   resetOptimizer();
