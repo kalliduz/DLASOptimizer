@@ -30,6 +30,9 @@ const state = {
   lastSentBestMse: Infinity,
 };
 
+if (typeof OffscreenCanvas === "undefined") {
+  throw new Error("OffscreenCanvas is not supported in this environment; the optimizer worker requires OffscreenCanvas.");
+}
 const evalCanvas = new OffscreenCanvas(1, 1);
 
 function createRenderer(canvas) {
