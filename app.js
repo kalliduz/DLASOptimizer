@@ -49,8 +49,10 @@ const state = {
   mutationStrength: 1,
   lastUiDraw: 0,
   startedAt: 0,
-  cachedScaledRects: null,
   rectsVersion: 0,
+  bestRectsVersion: 0,
+  scaledRectsCache: { source: null, version: -1, scaled: null },
+  scaledBestRectsCache: { source: null, version: -1, scaled: null },
   chartMin: Infinity,
   chartMax: -Infinity,
   cachedApproxData: null,
@@ -317,18 +319,20 @@ function mutateRect(rect, settings) {
   return next;
 }
 
-function rescaleRectsToDisplay(rects, forceRecalc = false) {
-  if (!forceRecalc && state.cachedScaledRects && state.cachedScaledRects.length === rects.length) {
-    return state.cachedScaledRects;
+function rescaleRectsToDisplay(rects, version, cache, forceRecalc = false) {
+  if (!forceRecalc && cache.source === rects && cache.version === version && cache.scaled) {
+    return cache.scaled;
   }
   const sx = state.width / state.evalW;
   const sy = state.height / state.evalH;
-  state.cachedScaledRects = rects.map((r) => ({ ...r, x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy }));
-  return state.cachedScaledRects;
+  cache.source = rects;
+  cache.version = version;
+  cache.scaled = rects.map((r) => ({ ...r, x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy }));
+  return cache.scaled;
 }
 
 function rebuildBestCanvas() {
-  const scaled = rescaleRectsToDisplay(state.bestRects, true);
+  const scaled = rescaleRectsToDisplay(state.bestRects, state.bestRectsVersion, state.scaledBestRectsCache);
   drawScene(bestCtx, scaled, state.width, state.height);
 }
 
@@ -337,7 +341,7 @@ function updateUi(force = false) {
   if (!force && now - state.lastUiDraw < 65) return;
   state.lastUiDraw = now;
 
-  const scaledRects = rescaleRectsToDisplay(state.rects);
+  const scaledRects = rescaleRectsToDisplay(state.rects, state.rectsVersion, state.scaledRectsCache);
   drawScene(actx, scaledRects, state.width, state.height);
   const showDiff = ui.showDiff.checked;
   diffCanvas.classList.toggle("hidden", !showDiff);
@@ -462,7 +466,10 @@ function resetOptimizer() {
   const settings = readSettings();
   state.mutationStrength = settings.mutationStrength;
   state.rects = [];
-  state.cachedScaledRects = null;
+  state.rectsVersion = 0;
+  state.bestRectsVersion = 0;
+  state.scaledRectsCache = { source: null, version: -1, scaled: null };
+  state.scaledBestRectsCache = { source: null, version: -1, scaled: null };
   state.cachedApproxData = null;
   state.chartMin = Infinity;
   state.chartMax = -Infinity;
@@ -479,6 +486,7 @@ function resetOptimizer() {
   for (let i = 0; i < state.rects.length; i++) {
     state.bestRects[i] = { ...state.rects[i] };
   }
+  state.bestRectsVersion++;
   state.iterations = 0;
   state.accepted = 0;
   state.worseAccepted = 0;
@@ -519,7 +527,7 @@ function collectWorkerStats() {
   let mutationTotal = 0;
   let mutationContributors = 0;
   for (const stats of state.workerStats) {
-    if (!stats) continue;
+    if (!stats || !stats.rects || !stats.bestRects) continue;
     iterations += stats.iterations || 0;
     accepted += stats.accepted || 0;
     worseAccepted += stats.worseAccepted || 0;
@@ -540,7 +548,8 @@ function collectWorkerStats() {
     state.workerBest = best;
     state.rects = best.rects.map((r) => ({ ...r }));
     state.bestRects = best.bestRects.map((r) => ({ ...r }));
-    state.cachedScaledRects = null;
+    state.rectsVersion++;
+    state.bestRectsVersion++;
     rebuildBestCanvas();
   }
 }
@@ -607,7 +616,13 @@ function startWorkerMode(settings) {
     worker.onmessage = (event) => {
       const msg = event.data;
       if (msg.type === 'stats') {
-        state.workerStats[msg.id] = msg.payload;
+        const prev = state.workerStats[msg.id] || {};
+        state.workerStats[msg.id] = {
+          ...prev,
+          ...msg.payload,
+          rects: msg.payload.rects || prev.rects,
+          bestRects: msg.payload.bestRects || prev.bestRects,
+        };
       }
     };
     worker.postMessage({
@@ -651,6 +666,7 @@ function optimizerStep() {
     const old = state.rects[idx];
     const next = mutateRect(old, settings);
     state.rects[idx] = next;
+    state.rectsVersion++;
 
     const delta = evalMutationDelta(old, next);
     const candMse = mseFromErrSum(delta.nextErrSum);
@@ -673,11 +689,12 @@ function optimizerStep() {
         for (let i = 0; i < state.rects.length; i++) {
           state.bestRects[i] = { ...state.rects[i] };
         }
+        state.bestRectsVersion++;
         rebuildBestCanvas();
       }
-      state.cachedScaledRects = null;
     } else {
       state.rects[idx] = old;
+      state.rectsVersion--;
       state.acceptWindow.push(0);
     }
 
