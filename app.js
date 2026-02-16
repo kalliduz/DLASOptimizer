@@ -20,6 +20,8 @@ const evalCanvas = document.createElement("canvas");
 const evalCtx = evalCanvas.getContext("2d", { willReadFrequently: true });
 const bestCanvas = document.createElement("canvas");
 const bestCtx = bestCanvas.getContext("2d");
+const patchCanvas = document.createElement("canvas");
+const patchCtx = patchCanvas.getContext("2d", { willReadFrequently: true });
 
 const state = {
   running: false,
@@ -50,6 +52,8 @@ const state = {
   chartMin: Infinity,
   chartMax: -Infinity,
   cachedApproxData: null,
+  evalRenderData: null,
+  currentErrSum: Infinity,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -123,16 +127,118 @@ function scoreMse(renderData, targetData) {
   return err / ((targetData.length / 4) * 3);
 }
 
+function scoreErrSum(renderData, targetData) {
+  let err = 0;
+  for (let i = 0; i < targetData.length; i += 4) {
+    const dr = renderData[i] - targetData[i];
+    const dg = renderData[i + 1] - targetData[i + 1];
+    const db = renderData[i + 2] - targetData[i + 2];
+    err += dr * dr + dg * dg + db * db;
+  }
+  return err;
+}
+
+function mseFromErrSum(errSum) {
+  return errSum / (state.evalW * state.evalH * 3);
+}
+
+function syncEvalRenderData() {
+  state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+}
+
+function rectAabb(rect) {
+  const hw = rect.w / 2;
+  const hh = rect.h / 2;
+  if (!rect.angle) {
+    return { x0: rect.x - hw, y0: rect.y - hh, x1: rect.x + hw, y1: rect.y + hh };
+  }
+  const c = Math.abs(Math.cos(rect.angle));
+  const s = Math.abs(Math.sin(rect.angle));
+  const ex = c * hw + s * hh;
+  const ey = s * hw + c * hh;
+  return { x0: rect.x - ex, y0: rect.y - ey, x1: rect.x + ex, y1: rect.y + ey };
+}
+
+function mergeDirtyRegion(a, b) {
+  const x0 = clamp(Math.floor(Math.min(a.x0, b.x0)), 0, state.evalW - 1);
+  const y0 = clamp(Math.floor(Math.min(a.y0, b.y0)), 0, state.evalH - 1);
+  const x1 = clamp(Math.ceil(Math.max(a.x1, b.x1)), 0, state.evalW);
+  const y1 = clamp(Math.ceil(Math.max(a.y1, b.y1)), 0, state.evalH);
+  return { x0, y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+}
+
+function intersectsRegion(rect, region) {
+  const b = rectAabb(rect);
+  return !(b.x1 < region.x0 || b.x0 > region.x0 + region.w || b.y1 < region.y0 || b.y0 > region.y0 + region.h);
+}
+
+function renderRegion(rects, region) {
+  patchCanvas.width = region.w;
+  patchCanvas.height = region.h;
+  patchCtx.clearRect(0, 0, region.w, region.h);
+  patchCtx.fillStyle = `rgb(${state.bg[0]},${state.bg[1]},${state.bg[2]})`;
+  patchCtx.fillRect(0, 0, region.w, region.h);
+  for (const rect of rects) {
+    if (!intersectsRegion(rect, region)) continue;
+    patchCtx.save();
+    patchCtx.translate(rect.x - region.x0, rect.y - region.y0);
+    if (rect.angle) patchCtx.rotate(rect.angle);
+    patchCtx.fillStyle = `rgba(${rect.r},${rect.g},${rect.b},${rect.a})`;
+    patchCtx.fillRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
+    patchCtx.restore();
+  }
+  return patchCtx.getImageData(0, 0, region.w, region.h).data;
+}
+
+function evalMutationDelta(oldRect, newRect) {
+  const region = mergeDirtyRegion(rectAabb(oldRect), rectAabb(newRect));
+  const patchData = renderRegion(state.rects, region);
+  let oldErr = 0;
+  let newErr = 0;
+  for (let y = 0; y < region.h; y++) {
+    let rowBase = ((region.y0 + y) * state.evalW + region.x0) * 4;
+    let patchBase = y * region.w * 4;
+    for (let x = 0; x < region.w; x++) {
+      const i = rowBase + x * 4;
+      const p = patchBase + x * 4;
+      const odr = state.evalRenderData[i] - state.evalTargetData[i];
+      const odg = state.evalRenderData[i + 1] - state.evalTargetData[i + 1];
+      const odb = state.evalRenderData[i + 2] - state.evalTargetData[i + 2];
+      oldErr += odr * odr + odg * odg + odb * odb;
+      const ndr = patchData[p] - state.evalTargetData[i];
+      const ndg = patchData[p + 1] - state.evalTargetData[i + 1];
+      const ndb = patchData[p + 2] - state.evalTargetData[i + 2];
+      newErr += ndr * ndr + ndg * ndg + ndb * ndb;
+    }
+  }
+
+  return {
+    nextErrSum: state.currentErrSum - oldErr + newErr,
+    region,
+    patchData,
+  };
+}
+
+function applyPatchToEvalData(region, patchData) {
+  for (let y = 0; y < region.h; y++) {
+    const dstBase = ((region.y0 + y) * state.evalW + region.x0) * 4;
+    const srcBase = y * region.w * 4;
+    state.evalRenderData.set(patchData.subarray(srcBase, srcBase + region.w * 4), dstBase);
+  }
+}
+
 function evaluateCurrent() {
   drawScene(evalCtx, state.rects, state.evalW, state.evalH);
-  return scoreMse(evalCtx.getImageData(0, 0, state.evalW, state.evalH).data, state.evalTargetData);
+  syncEvalRenderData();
+  state.currentErrSum = scoreErrSum(state.evalRenderData, state.evalTargetData);
+  return mseFromErrSum(state.currentErrSum);
 }
 
 function randomRect(settings, smart = false) {
   let x = rand(0, state.evalW), y = rand(0, state.evalH);
   if (smart && state.rects.length > 0) {
     let best = null;
-    const currentData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+    const currentData = state.evalRenderData || evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
     for (let i = 0; i < 40; i++) {
       const tx = randi(state.evalW), ty = randi(state.evalH);
       const idx = (ty * state.evalW + tx) * 4;
@@ -304,6 +410,8 @@ function resetOptimizer() {
   state.cachedApproxData = null;
   state.chartMin = Infinity;
   state.chartMax = -Infinity;
+  state.evalRenderData = null;
+  state.currentErrSum = Infinity;
   drawScene(evalCtx, [], state.evalW, state.evalH);
   for (let i = 0; i < settings.rectCount; i++) {
     state.rects.push(randomRect(settings, settings.smartInit));
@@ -338,7 +446,8 @@ function optimizerStep() {
     const next = mutateRect(old, settings);
     state.rects[idx] = next;
 
-    const candMse = evaluateCurrent();
+    const delta = evalMutationDelta(old, next);
+    const candMse = mseFromErrSum(delta.nextErrSum);
     const dlasThreshold = state.dlasHistory[state.dlasIndex];
     const accept = candMse <= state.mse || candMse <= dlasThreshold;
     state.iterations++;
@@ -346,6 +455,8 @@ function optimizerStep() {
     if (accept) {
       if (candMse > state.mse) state.worseAccepted++;
       state.mse = candMse;
+      state.currentErrSum = delta.nextErrSum;
+      applyPatchToEvalData(delta.region, delta.patchData);
       state.accepted++;
       state.acceptWindow.push(1);
       if (candMse < state.bestMse) {
