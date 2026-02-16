@@ -30,29 +30,110 @@ const state = {
   lastSentBestMse: Infinity,
 };
 
+if (typeof OffscreenCanvas === "undefined") {
+  throw new Error("OffscreenCanvas is not supported in this environment; the optimizer worker requires OffscreenCanvas.");
+}
 const evalCanvas = new OffscreenCanvas(1, 1);
-const evalCtx = evalCanvas.getContext("2d", { willReadFrequently: true });
-const patchCanvas = new OffscreenCanvas(1, 1);
-const patchCtx = patchCanvas.getContext("2d", { willReadFrequently: true });
+
+function createRenderer(canvas) {
+  const gl = canvas.getContext("webgl2", { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true })
+    || canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
+  if (!gl) throw new Error("WebGL unavailable in worker");
+
+  const vs = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs, `
+    attribute vec2 a_pos;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translate;
+    uniform vec2 u_scale;
+    uniform float u_angle;
+    uniform vec2 u_offset;
+    void main() {
+      vec2 p = a_pos * u_scale;
+      float c = cos(u_angle);
+      float s = sin(u_angle);
+      p = vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+      p += u_translate - u_offset;
+      vec2 clip = vec2((p.x / u_resolution.x) * 2.0 - 1.0, 1.0 - (p.y / u_resolution.y) * 2.0);
+      gl_Position = vec4(clip, 0.0, 1.0);
+    }
+  `);
+  gl.compileShader(vs);
+  if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(vs));
+
+  const fs = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs, `
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() { gl_FragColor = u_color; }
+  `);
+  gl.compileShader(fs);
+  if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(fs));
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]), gl.STATIC_DRAW);
+  gl.useProgram(program);
+  const aPos = gl.getAttribLocation(program, "a_pos");
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  const uResolution = gl.getUniformLocation(program, "u_resolution");
+  const uTranslate = gl.getUniformLocation(program, "u_translate");
+  const uScale = gl.getUniformLocation(program, "u_scale");
+  const uAngle = gl.getUniformLocation(program, "u_angle");
+  const uColor = gl.getUniformLocation(program, "u_color");
+  const uOffset = gl.getUniformLocation(program, "u_offset");
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  return {
+    drawScene(rects, w, h, bg, offsetX = 0, offsetY = 0, region = null) {
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      gl.viewport(0, 0, w, h);
+      gl.useProgram(program);
+      gl.uniform2f(uResolution, w, h);
+      gl.uniform2f(uOffset, offsetX, offsetY);
+      gl.clearColor(bg[0] / 255, bg[1] / 255, bg[2] / 255, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      for (const rect of rects) {
+        if (region && !intersectsRegion(rect, region)) continue;
+        gl.uniform2f(uTranslate, rect.x, rect.y);
+        gl.uniform2f(uScale, rect.w, rect.h);
+        gl.uniform1f(uAngle, rect.angle || 0);
+        gl.uniform4f(uColor, rect.r / 255, rect.g / 255, rect.b / 255, rect.a);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    },
+    readPixelsTopDown(w, h) {
+      const raw = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+      const flipped = new Uint8ClampedArray(raw.length);
+      const row = w * 4;
+      for (let y = 0; y < h; y++) {
+        const src = (h - 1 - y) * row;
+        const dst = y * row;
+        flipped.set(raw.subarray(src, src + row), dst);
+      }
+      return flipped;
+    }
+  };
+}
+
+const evalRenderer = createRenderer(evalCanvas);
 
 function almostEqual(a, b) { return Math.abs(a - b) <= EPS; }
 function mseFromErrSum(errSum) { return errSum / (state.evalW * state.evalH * 3); }
-
-function drawRect(ctx, rect) {
-  ctx.save();
-  ctx.translate(rect.x, rect.y);
-  if (rect.angle) ctx.rotate(rect.angle);
-  ctx.fillStyle = `rgba(${rect.r},${rect.g},${rect.b},${rect.a})`;
-  ctx.fillRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
-  ctx.restore();
-}
-
-function drawScene(ctx, rects, w, h) {
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = `rgb(${state.bg[0]},${state.bg[1]},${state.bg[2]})`;
-  ctx.fillRect(0, 0, w, h);
-  for (const rect of rects) drawRect(ctx, rect);
-}
 
 function scoreErrSum(renderData, targetData) {
   let err = 0;
@@ -90,21 +171,8 @@ function intersectsRegion(rect, region) {
 }
 
 function renderRegion(rects, region) {
-  patchCanvas.width = region.w;
-  patchCanvas.height = region.h;
-  patchCtx.clearRect(0, 0, region.w, region.h);
-  patchCtx.fillStyle = `rgb(${state.bg[0]},${state.bg[1]},${state.bg[2]})`;
-  patchCtx.fillRect(0, 0, region.w, region.h);
-  for (const rect of rects) {
-    if (!intersectsRegion(rect, region)) continue;
-    patchCtx.save();
-    patchCtx.translate(rect.x - region.x0, rect.y - region.y0);
-    if (rect.angle) patchCtx.rotate(rect.angle);
-    patchCtx.fillStyle = `rgba(${rect.r},${rect.g},${rect.b},${rect.a})`;
-    patchCtx.fillRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
-    patchCtx.restore();
-  }
-  return patchCtx.getImageData(0, 0, region.w, region.h).data;
+  evalRenderer.drawScene(rects, region.w, region.h, state.bg, region.x0, region.y0, region);
+  return evalRenderer.readPixelsTopDown(region.w, region.h);
 }
 
 function evalMutationDelta(oldRect, newRect) {
@@ -239,8 +307,8 @@ function adoptElite(payload) {
   if (!rects.length || rects.length !== bestRects.length) return;
   state.rects = rects;
   state.bestRects = bestRects;
-  drawScene(evalCtx, state.rects, state.evalW, state.evalH);
-  state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+  evalRenderer.drawScene(state.rects, state.evalW, state.evalH, state.bg);
+  state.evalRenderData = evalRenderer.readPixelsTopDown(state.evalW, state.evalH);
   state.currentErrSum = scoreErrSum(state.evalRenderData, state.evalTargetData);
   state.mse = mseFromErrSum(state.currentErrSum);
   state.bestMse = Math.min(Number.isFinite(payload.bestMse) ? payload.bestMse : Infinity, state.mse);
@@ -272,8 +340,8 @@ function applyRuntimeSettings(nextSettings) {
 }
 
 function evaluateCurrent() {
-  drawScene(evalCtx, state.rects, state.evalW, state.evalH);
-  state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+  evalRenderer.drawScene(state.rects, state.evalW, state.evalH, state.bg);
+  state.evalRenderData = evalRenderer.readPixelsTopDown(state.evalW, state.evalH);
   state.currentErrSum = scoreErrSum(state.evalRenderData, state.evalTargetData);
   state.mse = mseFromErrSum(state.currentErrSum);
   state.bestMse = state.mse;
@@ -283,16 +351,14 @@ function resetOptimizer() {
   const settings = state.settings;
   state.rects = [];
   state.mutationStrength = settings.mutationStrength;
-  evalCanvas.width = state.evalW;
-  evalCanvas.height = state.evalH;
-  drawScene(evalCtx, [], state.evalW, state.evalH);
-  state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+  evalRenderer.drawScene([], state.evalW, state.evalH, state.bg);
+  state.evalRenderData = evalRenderer.readPixelsTopDown(state.evalW, state.evalH);
 
   for (let i = 0; i < settings.rectCount; i++) {
     state.rects.push(randomRect(settings.smartInit));
     if (settings.smartInit && i % 8 === 0) {
-      drawScene(evalCtx, state.rects, state.evalW, state.evalH);
-      state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+      evalRenderer.drawScene(state.rects, state.evalW, state.evalH, state.bg);
+      state.evalRenderData = evalRenderer.readPixelsTopDown(state.evalW, state.evalH);
     }
   }
 
