@@ -26,6 +26,7 @@ const state = {
   dlasMaxCount: 0,
   mutationStrength: 1,
   lastReport: 0,
+  acceptWindow: [],
 };
 
 const evalCanvas = new OffscreenCanvas(1, 1);
@@ -229,6 +230,46 @@ function replaceDlasHistory(index, value) {
   if (state.dlasMaxCount <= 0) recalcDlasMax();
 }
 
+
+function adoptElite(payload) {
+  if (!payload || !Array.isArray(payload.rects) || !Array.isArray(payload.bestRects)) return;
+  const rects = payload.rects.map((r) => ({ ...r }));
+  const bestRects = payload.bestRects.map((r) => ({ ...r }));
+  if (!rects.length || rects.length !== bestRects.length) return;
+  state.rects = rects;
+  state.bestRects = bestRects;
+  drawScene(evalCtx, state.rects, state.evalW, state.evalH);
+  state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
+  state.currentErrSum = scoreErrSum(state.evalRenderData, state.evalTargetData);
+  state.mse = mseFromErrSum(state.currentErrSum);
+  state.bestMse = Math.min(Number.isFinite(payload.bestMse) ? payload.bestMse : Infinity, state.mse);
+  state.dlasHistory = new Array(state.settings.dlasHistory).fill(state.mse);
+  state.dlasIndex = 0;
+  state.dlasMax = state.mse;
+  state.dlasMaxCount = state.dlasHistory.length;
+  state.acceptWindow = [];
+}
+
+function applyRuntimeSettings(nextSettings) {
+  if (!nextSettings) return;
+  if (Number.isFinite(nextSettings.mutPerIter)) state.settings.mutPerIter = Math.max(1, Math.floor(nextSettings.mutPerIter));
+  if (Number.isFinite(nextSettings.computeBudget)) state.settings.computeBudget = clamp(nextSettings.computeBudget, 0.5, 50);
+  if (typeof nextSettings.autoAdapt === 'boolean') state.settings.autoAdapt = nextSettings.autoAdapt;
+  if (Number.isFinite(nextSettings.mutationStrength) && !state.settings.autoAdapt) {
+    state.mutationStrength = clamp(nextSettings.mutationStrength, 0.08, 5);
+  }
+  if (Number.isFinite(nextSettings.dlasHistory)) {
+    const target = Math.max(5, Math.floor(nextSettings.dlasHistory));
+    if (target !== state.settings.dlasHistory) {
+      state.settings.dlasHistory = target;
+      state.dlasHistory = new Array(target).fill(state.mse);
+      state.dlasIndex = 0;
+      state.dlasMax = state.mse;
+      state.dlasMaxCount = state.dlasHistory.length;
+    }
+  }
+}
+
 function evaluateCurrent() {
   drawScene(evalCtx, state.rects, state.evalW, state.evalH);
   state.evalRenderData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
@@ -259,6 +300,7 @@ function resetOptimizer() {
   state.iterations = 0;
   state.accepted = 0;
   state.worseAccepted = 0;
+  state.acceptWindow = [];
   state.dlasHistory = new Array(settings.dlasHistory).fill(state.mse);
   state.dlasIndex = 0;
   state.dlasMax = state.mse;
@@ -288,13 +330,17 @@ function optimizationSlice() {
       state.currentErrSum = delta.nextErrSum;
       applyPatchToEvalData(delta.region, delta.patchData);
       state.accepted++;
+      state.acceptWindow.push(1);
       if (candMse < state.bestMse) {
         state.bestMse = candMse;
         state.bestRects = state.rects.map((r) => ({ ...r }));
       }
     } else {
       state.rects[idx] = old;
+      state.acceptWindow.push(0);
     }
+
+    if (state.acceptWindow.length > 250) state.acceptWindow.shift();
 
     const historyValue = state.dlasHistory[state.dlasIndex];
     const shouldReplace = state.mse > historyValue || (state.mse < historyValue && state.mse + EPS < prevMse);
@@ -302,10 +348,12 @@ function optimizationSlice() {
     state.dlasIndex = (state.dlasIndex + 1) % state.dlasHistory.length;
   }
 
-  if (settings.autoAdapt && state.iterations > 40) {
-    const acceptance = state.accepted / Math.max(1, state.iterations);
+  if (settings.autoAdapt && state.acceptWindow.length > 40) {
+    const acceptance = state.acceptWindow.reduce((a, b) => a + b, 0) / state.acceptWindow.length;
     if (acceptance < 0.08) state.mutationStrength = clamp(state.mutationStrength * 0.97, 0.08, 5);
     else if (acceptance > 0.45) state.mutationStrength = clamp(state.mutationStrength * 1.03, 0.08, 5);
+  } else if (!settings.autoAdapt) {
+    state.mutationStrength = clamp(settings.mutationStrength, 0.08, 5);
   }
 
   const now = performance.now();
@@ -320,6 +368,7 @@ function optimizationSlice() {
         iterations: state.iterations,
         accepted: state.accepted,
         worseAccepted: state.worseAccepted,
+        mutationStrength: state.mutationStrength,
         rects: state.rects,
         bestRects: state.bestRects,
       },
@@ -344,5 +393,9 @@ onmessage = (event) => {
     optimizationSlice();
   } else if (msg.type === 'stop') {
     state.running = false;
+  } else if (msg.type === 'update-settings') {
+    applyRuntimeSettings(msg.payload);
+  } else if (msg.type === 'inject-elite') {
+    adoptElite(msg.payload);
   }
 };
