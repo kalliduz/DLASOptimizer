@@ -3,7 +3,7 @@ const ui = {
   imageUpload: $("imageUpload"), startBtn: $("startBtn"), pauseBtn: $("pauseBtn"), resetBtn: $("resetBtn"), exportBtn: $("exportBtn"),
   rectCount: $("rectCount"), minSize: $("minSize"), maxSize: $("maxSize"), minAlpha: $("minAlpha"), maxAlpha: $("maxAlpha"),
   mutPerIter: $("mutPerIter"), mutationStrength: $("mutationStrength"), autoAdapt: $("autoAdapt"), dlasHistory: $("dlasHistory"),
-  computeBudget: $("computeBudget"), bgMode: $("bgMode"), smartInit: $("smartInit"), colorFromTarget: $("colorFromTarget"),
+  computeBudget: $("computeBudget"), optimizeScale: $("optimizeScale"), bgMode: $("bgMode"), smartInit: $("smartInit"), colorFromTarget: $("colorFromTarget"),
   allowRotation: $("allowRotation"), multiWorker: $("multiWorker"), workerCount: $("workerCount"), showDiff: $("showDiff"), runningDot: $("runningDot"), statsPanel: $("statsPanel")
 };
 
@@ -87,6 +87,7 @@ function readSettings() {
     autoAdapt: ui.autoAdapt.checked,
     dlasHistory: clamp(parseInt(ui.dlasHistory.value, 10) || 1000, 5, 50000),
     computeBudget: clamp(parseFloat(ui.computeBudget.value) || 8, 1, 40),
+    optimizeScale: ui.optimizeScale.value === "full" ? "full" : "downscaled",
     bgMode: ui.bgMode.value,
     smartInit: ui.smartInit.checked,
     colorFromTarget: ui.colorFromTarget.checked,
@@ -99,6 +100,22 @@ function readSettings() {
 
 function setCanvasSize(w, h) {
   [originalCanvas, approxCanvas, diffCanvas, bestCanvas].forEach((cv) => { cv.width = w; cv.height = h; });
+}
+
+function syncEvalTarget(optimizeScale) {
+  const optimizeFullScale = optimizeScale === "full";
+  if (optimizeFullScale) {
+    state.evalW = state.width;
+    state.evalH = state.height;
+  } else {
+    const evalScale = Math.min(1, 128 / Math.max(state.width, state.height));
+    state.evalW = Math.max(8, Math.round(state.width * evalScale));
+    state.evalH = Math.max(8, Math.round(state.height * evalScale));
+  }
+  evalCanvas.width = state.evalW;
+  evalCanvas.height = state.evalH;
+  evalCtx.drawImage(originalCanvas, 0, 0, state.evalW, state.evalH);
+  state.evalTargetData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
 }
 
 function computeBackground(mode, data) {
@@ -327,6 +344,12 @@ function mutateRect(rect, settings) {
 function rescaleRectsToDisplay(rects, version, cache, forceRecalc = false) {
   if (!forceRecalc && cache.source === rects && cache.version === version && cache.scaled) {
     return cache.scaled;
+  }
+  if (state.width === state.evalW && state.height === state.evalH) {
+    cache.source = rects;
+    cache.version = version;
+    cache.scaled = rects;
+    return rects;
   }
   const sx = state.width / state.evalW;
   const sy = state.height / state.evalH;
@@ -738,17 +761,10 @@ async function loadImage(file) {
   setCanvasSize(state.width, state.height);
   octx.drawImage(img, 0, 0, state.width, state.height);
   state.targetData = octx.getImageData(0, 0, state.width, state.height).data;
+  const settings = readSettings();
+  syncEvalTarget(settings.optimizeScale);
 
-  const evalMax = 128;
-  const evalScale = Math.min(1, evalMax / Math.max(state.width, state.height));
-  state.evalW = Math.max(8, Math.round(state.width * evalScale));
-  state.evalH = Math.max(8, Math.round(state.height * evalScale));
-  evalCanvas.width = state.evalW;
-  evalCanvas.height = state.evalH;
-  evalCtx.drawImage(originalCanvas, 0, 0, state.evalW, state.evalH);
-  state.evalTargetData = evalCtx.getImageData(0, 0, state.evalW, state.evalH).data;
-
-  state.bg = computeBackground(readSettings().bgMode, state.targetData);
+  state.bg = computeBackground(settings.bgMode, state.targetData);
   resetOptimizer();
   ui.startBtn.disabled = false;
   ui.pauseBtn.disabled = false;
@@ -774,7 +790,9 @@ ui.startBtn.addEventListener("click", () => {
 ui.pauseBtn.addEventListener("click", () => { state.running = false; stopWorkerMode(); ui.runningDot.className = "dot idle"; updateUi(true); });
 ui.resetBtn.addEventListener("click", () => {
   if (!state.targetData) return;
-  state.bg = computeBackground(readSettings().bgMode, state.targetData);
+  const settings = readSettings();
+  syncEvalTarget(settings.optimizeScale);
+  state.bg = computeBackground(settings.bgMode, state.targetData);
   resetOptimizer();
 });
 ui.exportBtn.addEventListener("click", () => {
@@ -785,3 +803,8 @@ ui.exportBtn.addEventListener("click", () => {
   a.click();
 });
 ui.showDiff.addEventListener("change", () => updateUi(true));
+ui.optimizeScale.addEventListener("change", () => {
+  if (!state.targetData || state.running) return;
+  syncEvalTarget(readSettings().optimizeScale);
+  resetOptimizer();
+});
