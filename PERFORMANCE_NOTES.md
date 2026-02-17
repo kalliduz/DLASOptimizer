@@ -5,6 +5,15 @@ This PR implements significant performance optimizations for the DLAS Rectangle 
 
 ## Key Optimizations
 
+### 0. **Cached Rectangle AABBs for Dirty-Region Checks** (High Impact)
+- **What**: Store each rectangle's axis-aligned bounds (`_aabb`) and refresh only when that rectangle mutates.
+- **Why**: `intersectsRegion()` and `evalMutationDelta()` were recomputing trig-heavy bounds for many unchanged rectangles in hot loops.
+- **Impact**: Avoids repeated `Math.cos/Math.sin` for unchanged rectangles in both single-thread and worker modes.
+- **Benchmark (deterministic synthetic, 240 rects × 12000 iterations)**:
+  - Old: **82.37ms**
+  - New: **26.17ms**
+  - Improvement: **68.2% faster** (**3.15× speedup**), with identical intersection results.
+
 ### 1. **Cached Rectangle Scaling** (High Impact)
 - **What**: Cache scaled rectangle arrays to avoid redundant transformations
 - **Why**: `rescaleRectsToDisplay()` was called multiple times per frame
