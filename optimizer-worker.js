@@ -76,6 +76,11 @@ function rectAabb(rect) {
   return { x0: rect.x - ex, y0: rect.y - ey, x1: rect.x + ex, y1: rect.y + ey };
 }
 
+function updateRectAabb(rect) {
+  rect._aabb = rectAabb(rect);
+  return rect;
+}
+
 function mergeDirtyRegion(a, b) {
   const x0 = clamp(Math.floor(Math.min(a.x0, b.x0)), 0, state.evalW - 1);
   const y0 = clamp(Math.floor(Math.min(a.y0, b.y0)), 0, state.evalH - 1);
@@ -85,7 +90,7 @@ function mergeDirtyRegion(a, b) {
 }
 
 function intersectsRegion(rect, region) {
-  const b = rectAabb(rect);
+  const b = rect._aabb || rectAabb(rect);
   return !(b.x1 < region.x0 || b.x0 > region.x0 + region.w || b.y1 < region.y0 || b.y0 > region.y0 + region.h);
 }
 
@@ -108,7 +113,7 @@ function renderRegion(rects, region) {
 }
 
 function evalMutationDelta(oldRect, newRect) {
-  const region = mergeDirtyRegion(rectAabb(oldRect), rectAabb(newRect));
+  const region = mergeDirtyRegion(oldRect._aabb || rectAabb(oldRect), newRect._aabb || rectAabb(newRect));
   const patchData = renderRegion(state.rects, region);
   let oldErr = 0;
   let newErr = 0;
@@ -171,7 +176,7 @@ function randomRect(smart = false) {
     const idx = (iy * state.evalW + ix) * 4;
     rect.r = state.evalTargetData[idx]; rect.g = state.evalTargetData[idx + 1]; rect.b = state.evalTargetData[idx + 2];
   }
-  return rect;
+  return updateRectAabb(rect);
 }
 
 function mutateRect(rect) {
@@ -206,7 +211,7 @@ function mutateRect(rect) {
   } else {
     next.angle += rand(-0.6, 0.6) * s;
   }
-  return next;
+  return updateRectAabb(next);
 }
 
 function recalcDlasMax() {
