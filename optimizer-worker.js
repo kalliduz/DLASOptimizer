@@ -351,7 +351,7 @@ function optimizationSlice() {
       state.acceptWindow.push(0);
     }
 
-    if (state.acceptWindow.length > 250) state.acceptWindowSum -= state.acceptWindow.shift();
+    if (state.acceptWindow.length > 250) state.acceptWindowSum -= (state.acceptWindow.shift() ?? 0);
 
     const historyValue = state.dlasHistory[state.dlasIndex];
     const shouldReplace = state.mse > historyValue || (state.mse < historyValue && state.mse + EPS < prevMse);

@@ -736,7 +736,7 @@ function optimizerStep() {
       (state.mse < historyValue && state.mse + EPS < prevMse);
     if (shouldReplace) replaceDlasHistory(state.dlasIndex, state.mse);
     state.dlasIndex = (state.dlasIndex + 1) % state.dlasHistory.length;
-    if (state.acceptWindow.length > 250) state.acceptWindowSum -= state.acceptWindow.shift();
+    if (state.acceptWindow.length > 250) state.acceptWindowSum -= (state.acceptWindow.shift() ?? 0);
   }
 
   if (settings.autoAdapt && state.acceptWindow.length > 40) {
