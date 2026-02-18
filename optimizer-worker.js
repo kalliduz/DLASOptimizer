@@ -27,6 +27,7 @@ const state = {
   mutationStrength: 1,
   lastReport: 0,
   acceptWindow: [],
+  acceptWindowSum: 0,
   lastSentBestMse: Infinity,
 };
 
@@ -254,6 +255,7 @@ function adoptElite(payload) {
   state.dlasMax = state.mse;
   state.dlasMaxCount = state.dlasHistory.length;
   state.acceptWindow = [];
+  state.acceptWindowSum = 0;
 }
 
 function applyRuntimeSettings(nextSettings) {
@@ -307,6 +309,7 @@ function resetOptimizer() {
   state.accepted = 0;
   state.worseAccepted = 0;
   state.acceptWindow = [];
+  state.acceptWindowSum = 0;
   state.dlasHistory = new Array(settings.dlasHistory).fill(state.mse);
   state.dlasIndex = 0;
   state.dlasMax = state.mse;
@@ -338,6 +341,7 @@ function optimizationSlice() {
       applyPatchToEvalData(delta.region, delta.patchData);
       state.accepted++;
       state.acceptWindow.push(1);
+      state.acceptWindowSum++;
       if (candMse < state.bestMse) {
         state.bestMse = candMse;
         state.bestRects = state.rects.map((r) => ({ ...r }));
@@ -347,7 +351,7 @@ function optimizationSlice() {
       state.acceptWindow.push(0);
     }
 
-    if (state.acceptWindow.length > 250) state.acceptWindow.shift();
+    if (state.acceptWindow.length > 250) state.acceptWindowSum -= (state.acceptWindow.shift() ?? 0);
 
     const historyValue = state.dlasHistory[state.dlasIndex];
     const shouldReplace = state.mse > historyValue || (state.mse < historyValue && state.mse + EPS < prevMse);
@@ -356,7 +360,7 @@ function optimizationSlice() {
   }
 
   if (settings.autoAdapt && state.acceptWindow.length > 40) {
-    const acceptance = state.acceptWindow.reduce((a, b) => a + b, 0) / state.acceptWindow.length;
+    const acceptance = state.acceptWindowSum / state.acceptWindow.length;
     if (acceptance < 0.08) state.mutationStrength = clamp(state.mutationStrength * 0.97, 0.08, 5);
     else if (acceptance > 0.45) state.mutationStrength = clamp(state.mutationStrength * 1.03, 0.08, 5);
   } else if (!settings.autoAdapt) {

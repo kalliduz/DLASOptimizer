@@ -40,6 +40,7 @@ const state = {
   accepted: 0,
   worseAccepted: 0,
   acceptWindow: [],
+  acceptWindowSum: 0,
   lastTick: 0,
   chart: [],
   dlasHistory: [],
@@ -389,7 +390,7 @@ function updateUi(force = false) {
   const elapsed = (performance.now() - state.startedAt) / 1000;
   const ips = elapsed > 0 ? Math.round(state.iterations / elapsed) : 0;
   const accRate = state.acceptWindow.length
-    ? (state.acceptWindow.reduce((a, b) => a + b, 0) / state.acceptWindow.length) * 100
+    ? (state.acceptWindowSum / state.acceptWindow.length) * 100
     : (state.iterations ? (state.accepted / state.iterations) * 100 : 0);
   const sim = Math.max(0, 100 * (1 - state.bestMse / (255 * 255)));
   const settings = readSettings();
@@ -519,6 +520,7 @@ function resetOptimizer() {
   state.accepted = 0;
   state.worseAccepted = 0;
   state.acceptWindow = [];
+  state.acceptWindowSum = 0;
   state.chart = [];
   state.dlasHistory = new Array(settings.dlasHistory).fill(state.mse);
   state.dlasIndex = 0;
@@ -632,6 +634,7 @@ function startWorkerMode(settings) {
   state.accepted = 0;
   state.worseAccepted = 0;
   state.acceptWindow = [];
+  state.acceptWindowSum = 0;
   state.chart = [];
   state.chartMin = Infinity;
   state.chartMax = -Infinity;
@@ -709,6 +712,7 @@ function optimizerStep() {
       applyPatchToEvalData(delta.region, delta.patchData);
       state.accepted++;
       state.acceptWindow.push(1);
+      state.acceptWindowSum++;
       if (candMse < state.bestMse) {
         state.bestMse = candMse;
         if (state.bestRects.length !== state.rects.length) {
@@ -732,11 +736,11 @@ function optimizerStep() {
       (state.mse < historyValue && state.mse + EPS < prevMse);
     if (shouldReplace) replaceDlasHistory(state.dlasIndex, state.mse);
     state.dlasIndex = (state.dlasIndex + 1) % state.dlasHistory.length;
-    if (state.acceptWindow.length > 250) state.acceptWindow.shift();
+    if (state.acceptWindow.length > 250) state.acceptWindowSum -= (state.acceptWindow.shift() ?? 0);
   }
 
   if (settings.autoAdapt && state.acceptWindow.length > 40) {
-    const rate = state.acceptWindow.reduce((a, b) => a + b, 0) / state.acceptWindow.length;
+    const rate = state.acceptWindowSum / state.acceptWindow.length;
     if (rate < 0.08) state.mutationStrength = clamp(state.mutationStrength * 0.97, 0.08, 5);
     else if (rate > 0.45) state.mutationStrength = clamp(state.mutationStrength * 1.03, 0.08, 5);
   } else {
