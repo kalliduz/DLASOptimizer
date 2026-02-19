@@ -96,8 +96,12 @@ function intersectsRegion(rect, region) {
 }
 
 function renderRegion(rects, region) {
-  patchCanvas.width = region.w;
-  patchCanvas.height = region.h;
+  // Only resize canvas if needed, avoiding expensive GPU-CPU sync
+  if (patchCanvas.width < region.w || patchCanvas.height < region.h) {
+    patchCanvas.width = Math.max(region.w, patchCanvas.width);
+    patchCanvas.height = Math.max(region.h, patchCanvas.height);
+  }
+  // Clear and fill only the region we'll read - artifacts outside region don't affect getImageData
   patchCtx.clearRect(0, 0, region.w, region.h);
   patchCtx.fillStyle = `rgb(${state.bg[0]},${state.bg[1]},${state.bg[2]})`;
   patchCtx.fillRect(0, 0, region.w, region.h);
