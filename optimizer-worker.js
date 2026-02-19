@@ -195,7 +195,7 @@ function mutateRect(rect) {
   const mode = randi(6 + (settings.allowRotation ? 1 : 0));
   if (mode === 0) { next.x = clamp(next.x + rand(-20, 20) * s, 0, state.evalW); next.y = clamp(next.y + rand(-20, 20) * s, 0, state.evalH); }
   else if (mode === 1) { next.w = clamp(next.w + rand(-20, 20) * s, minS, maxS); next.h = clamp(next.h + rand(-20, 20) * s, minS, maxS); }
-  else if (mode === 2) { next.a = clamp(next.a + rand(-0.25, 0.25) * s, minA, maxA); }
+  else if (mode === 2) { next.a = clamp(next.a + rand(-0.0784, 0.0784) * s, minA, maxA); }
   else if (mode === 3) {
     if (settings.colorFromTarget && Math.random() < 0.8) {
       const ix = clamp(Math.round(next.x), 0, state.evalW - 1);
@@ -205,16 +205,16 @@ function mutateRect(rect) {
       next.g = clamp(state.evalTargetData[idx + 1] + rand(-30, 30), 0, 255);
       next.b = clamp(state.evalTargetData[idx + 2] + rand(-30, 30), 0, 255);
     } else {
-      next.r = clamp(next.r + rand(-70, 70) * s, 0, 255);
-      next.g = clamp(next.g + rand(-70, 70) * s, 0, 255);
-      next.b = clamp(next.b + rand(-70, 70) * s, 0, 255);
+      next.r = clamp(next.r + rand(-20, 20) * s, 0, 255);
+      next.g = clamp(next.g + rand(-20, 20) * s, 0, 255);
+      next.b = clamp(next.b + rand(-20, 20) * s, 0, 255);
     }
   } else if (mode === 4) {
     next.x = rand(0, state.evalW); next.y = rand(0, state.evalH);
   } else if (mode === 5) {
     Object.assign(next, randomRect(false));
   } else {
-    next.angle += rand(-0.6, 0.6) * s;
+    next.angle += rand(-0.2, 0.2) * s;
   }
   return updateRectAabb(next);
 }
@@ -268,7 +268,7 @@ function applyRuntimeSettings(nextSettings) {
   if (Number.isFinite(nextSettings.computeBudget)) state.settings.computeBudget = clamp(nextSettings.computeBudget, 0.5, 50);
   if (typeof nextSettings.autoAdapt === 'boolean') state.settings.autoAdapt = nextSettings.autoAdapt;
   if (Number.isFinite(nextSettings.mutationStrength) && !state.settings.autoAdapt) {
-    state.mutationStrength = clamp(nextSettings.mutationStrength, 0.08, 5);
+    state.mutationStrength = clamp(nextSettings.mutationStrength, 0.05, 5);
   }
   if (Number.isFinite(nextSettings.dlasHistory)) {
     const target = Math.max(5, Math.floor(nextSettings.dlasHistory));
@@ -365,10 +365,10 @@ function optimizationSlice() {
 
   if (settings.autoAdapt && state.acceptWindow.length > 40) {
     const acceptance = state.acceptWindowSum / state.acceptWindow.length;
-    if (acceptance < 0.08) state.mutationStrength = clamp(state.mutationStrength * 0.97, 0.08, 5);
-    else if (acceptance > 0.45) state.mutationStrength = clamp(state.mutationStrength * 1.03, 0.08, 5);
+    if (acceptance < 0.08) state.mutationStrength = clamp(state.mutationStrength * 0.97, 0.05, 5);
+    else if (acceptance > 0.45) state.mutationStrength = clamp(state.mutationStrength * 1.03, 0.05, 5);
   } else if (!settings.autoAdapt) {
-    state.mutationStrength = clamp(settings.mutationStrength, 0.08, 5);
+    state.mutationStrength = clamp(settings.mutationStrength, 0.05, 5);
   }
 
   const now = performance.now();
