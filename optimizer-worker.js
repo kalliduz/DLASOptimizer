@@ -195,7 +195,7 @@ function mutateRect(rect) {
   const mode = randi(6 + (settings.allowRotation ? 1 : 0));
   if (mode === 0) { next.x = clamp(next.x + rand(-20, 20) * s, 0, state.evalW); next.y = clamp(next.y + rand(-20, 20) * s, 0, state.evalH); }
   else if (mode === 1) { next.w = clamp(next.w + rand(-20, 20) * s, minS, maxS); next.h = clamp(next.h + rand(-20, 20) * s, minS, maxS); }
-  else if (mode === 2) { next.a = clamp(next.a + rand(-0.0784, 0.0784) * s, minA, maxA); }
+  else if (mode === 2) { next.a = clamp(next.a + rand(-0.0784, 0.0784) * s, minA, maxA); } // 0.0784 * 0.05 ≈ 1/255 (min visible alpha change)
   else if (mode === 3) {
     if (settings.colorFromTarget && Math.random() < 0.8) {
       const ix = clamp(Math.round(next.x), 0, state.evalW - 1);
@@ -214,7 +214,7 @@ function mutateRect(rect) {
   } else if (mode === 5) {
     Object.assign(next, randomRect(false));
   } else {
-    next.angle += rand(-0.2, 0.2) * s;
+    next.angle += rand(-0.2, 0.2) * s; // 0.2 * 0.05 = 0.01 rad (~0.57 deg min rotation)
   }
   return updateRectAabb(next);
 }
