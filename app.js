@@ -57,6 +57,7 @@ const state = {
   chartMin: Infinity,
   chartMax: -Infinity,
   cachedApproxData: null,
+  cachedApproxVersion: -1,
   evalRenderData: null,
   currentErrSum: Infinity,
   workerPool: [],
@@ -213,8 +214,11 @@ function intersectsRegion(rect, region) {
 }
 
 function renderRegion(rects, region) {
-  patchCanvas.width = region.w;
-  patchCanvas.height = region.h;
+  // Only resize canvas if needed, avoiding expensive GPU-CPU sync
+  if (patchCanvas.width < region.w || patchCanvas.height < region.h) {
+    patchCanvas.width = Math.max(region.w, patchCanvas.width);
+    patchCanvas.height = Math.max(region.h, patchCanvas.height);
+  }
   patchCtx.clearRect(0, 0, region.w, region.h);
   patchCtx.fillStyle = `rgb(${state.bg[0]},${state.bg[1]},${state.bg[2]})`;
   patchCtx.fillRect(0, 0, region.w, region.h);
@@ -375,7 +379,11 @@ function updateUi(force = false) {
   const showDiff = ui.showDiff.checked;
   diffCanvas.classList.toggle("hidden", !showDiff);
   if (showDiff) {
-    state.cachedApproxData = actx.getImageData(0, 0, state.width, state.height).data;
+    // Cache approx data to avoid redundant getImageData calls
+    if (state.cachedApproxVersion !== state.rectsVersion || !state.cachedApproxData) {
+      state.cachedApproxData = actx.getImageData(0, 0, state.width, state.height).data;
+      state.cachedApproxVersion = state.rectsVersion;
+    }
     const approx = state.cachedApproxData;
     const diff = dctx.createImageData(state.width, state.height);
     for (let i = 0; i < diff.data.length; i += 4) {
@@ -500,6 +508,7 @@ function resetOptimizer() {
   state.scaledRectsCache = { source: null, version: -1, scaled: null };
   state.scaledBestRectsCache = { source: null, version: -1, scaled: null };
   state.cachedApproxData = null;
+  state.cachedApproxVersion = -1;
   state.chartMin = Infinity;
   state.chartMax = -Infinity;
   state.evalRenderData = null;
