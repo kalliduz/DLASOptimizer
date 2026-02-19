@@ -85,7 +85,7 @@ function readSettings() {
     minAlpha: clamp(parseFloat(ui.minAlpha.value) || 0.05, 0, 1),
     maxAlpha: clamp(parseFloat(ui.maxAlpha.value) || 0.4, 0, 1),
     mutPerIter: clamp(parseInt(ui.mutPerIter.value, 10) || 100, 1, 10000),
-    mutationStrength: clamp(parseFloat(ui.mutationStrength.value) || 1, 0.1, 4),
+    mutationStrength: clamp(parseFloat(ui.mutationStrength.value) || 1, 0.05, 4),
     autoAdapt: ui.autoAdapt.checked,
     dlasHistory: clamp(parseInt(ui.dlasHistory.value, 10) || 1000, 5, 50000),
     computeBudget: clamp(parseFloat(ui.computeBudget.value) || 8, 1, 40),
@@ -323,7 +323,7 @@ function mutateRect(rect, settings) {
   const mode = randi(6 + (settings.allowRotation ? 1 : 0));
   if (mode === 0) { next.x = clamp(next.x + rand(-20, 20) * s, 0, state.evalW); next.y = clamp(next.y + rand(-20, 20) * s, 0, state.evalH); }
   else if (mode === 1) { next.w = clamp(next.w + rand(-20, 20) * s, minS, maxS); next.h = clamp(next.h + rand(-20, 20) * s, minS, maxS); }
-  else if (mode === 2) { next.a = clamp(next.a + rand(-0.25, 0.25) * s, minA, maxA); }
+  else if (mode === 2) { next.a = clamp(next.a + rand(-0.0784, 0.0784) * s, minA, maxA); } // 0.0784 * 0.05 ≈ 1/255 (min visible alpha change)
   else if (mode === 3) {
     if (settings.colorFromTarget && Math.random() < 0.8) {
       const ix = clamp(Math.round(next.x), 0, state.evalW - 1);
@@ -333,16 +333,17 @@ function mutateRect(rect, settings) {
       next.g = clamp(state.evalTargetData[idx + 1] + rand(-30, 30), 0, 255);
       next.b = clamp(state.evalTargetData[idx + 2] + rand(-30, 30), 0, 255);
     } else {
-      next.r = clamp(next.r + rand(-70, 70) * s, 0, 255);
-      next.g = clamp(next.g + rand(-70, 70) * s, 0, 255);
-      next.b = clamp(next.b + rand(-70, 70) * s, 0, 255);
+      next.r = clamp(next.r + rand(-20, 20) * s, 0, 255);
+      next.g = clamp(next.g + rand(-20, 20) * s, 0, 255);
+      next.b = clamp(next.b + rand(-20, 20) * s, 0, 255);
     }
   } else if (mode === 4) {
     next.x = rand(0, state.evalW); next.y = rand(0, state.evalH);
   } else if (mode === 5) {
     Object.assign(next, randomRect(settings, false));
   } else {
-    next.angle += rand(-0.6, 0.6) * s;
+    next.angle += rand(-0.2, 0.2) * s; // 0.2 * 0.05 = 0.01 rad (~0.57 deg min rotation)
+  }
   }
   return updateRectAabb(next);
 }
@@ -762,8 +763,8 @@ function optimizerStep() {
 
   if (settings.autoAdapt && state.acceptWindow.length > 40) {
     const rate = state.acceptWindowSum / state.acceptWindow.length;
-    if (rate < 0.08) state.mutationStrength = clamp(state.mutationStrength * 0.97, 0.08, 5);
-    else if (rate > 0.45) state.mutationStrength = clamp(state.mutationStrength * 1.03, 0.08, 5);
+    if (rate < 0.08) state.mutationStrength = clamp(state.mutationStrength * 0.97, 0.05, 5);
+    else if (rate > 0.45) state.mutationStrength = clamp(state.mutationStrength * 1.03, 0.05, 5);
   } else {
     state.mutationStrength = settings.mutationStrength;
   }
