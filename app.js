@@ -397,10 +397,39 @@ function updateUi(force = false) {
   }
 
   const elapsed = (performance.now() - state.startedAt) / 1000;
-  const ips = elapsed > 0 ? Math.round(state.iterations / elapsed) : 0;
-  const accRate = state.acceptWindow.length
+  let ips = elapsed > 0 ? Math.round(state.iterations / elapsed) : 0;
+  let accRate = state.acceptWindow.length
     ? (state.acceptWindowSum / state.acceptWindow.length) * 100
     : (state.iterations ? (state.accepted / state.iterations) * 100 : 0);
+
+  const curMse = state.mse;
+  const bestMse = state.bestMse;
+  state.chart.push({ cur: curMse, best: bestMse, iterations: state.iterations, accepted: state.accepted, ts: now });
+  if (state.chart.length > 240) {
+    const removed = state.chart.shift();
+    if (removed.cur === state.chartMin || removed.cur === state.chartMax || removed.best === state.chartMin || removed.best === state.chartMax) {
+      state.chartMin = Infinity;
+      state.chartMax = -Infinity;
+      state.chart.forEach(p => {
+        state.chartMin = Math.min(state.chartMin, p.cur, p.best);
+        state.chartMax = Math.max(state.chartMax, p.cur, p.best);
+      });
+    }
+  } else {
+    state.chartMin = Math.min(state.chartMin, curMse, bestMse);
+    state.chartMax = Math.max(state.chartMax, curMse, bestMse);
+  }
+  if (state.chart.length > 1) {
+    const first = state.chart[0];
+    const last = state.chart[state.chart.length - 1];
+    const rollingElapsed = (last.ts - first.ts) / 1000;
+    const rollingIterations = last.iterations - first.iterations;
+    const rollingAccepted = Math.max(0, last.accepted - first.accepted);
+    if (rollingElapsed > 0 && rollingIterations >= 0) {
+      ips = Math.round(rollingIterations / rollingElapsed);
+      accRate = rollingIterations > 0 ? (rollingAccepted / rollingIterations) * 100 : 0;
+    }
+  }
   const sim = Math.max(0, 100 * (1 - state.bestMse / (255 * 255)));
   const settings = readSettings();
   const stats = {
@@ -417,24 +446,6 @@ function updateUi(force = false) {
   ui.statsPanel.innerHTML = Object.entries(stats)
     .map(([k, v]) => `<div class="stat">${k}<br><b>${v}</b></div>`)
     .join("");
-
-  const curMse = state.mse;
-  const bestMse = state.bestMse;
-  state.chart.push({ cur: curMse, best: bestMse });
-  if (state.chart.length > 240) {
-    const removed = state.chart.shift();
-    if (removed.cur === state.chartMin || removed.cur === state.chartMax || removed.best === state.chartMin || removed.best === state.chartMax) {
-      state.chartMin = Infinity;
-      state.chartMax = -Infinity;
-      state.chart.forEach(p => {
-        state.chartMin = Math.min(state.chartMin, p.cur, p.best);
-        state.chartMax = Math.max(state.chartMax, p.cur, p.best);
-      });
-    }
-  } else {
-    state.chartMin = Math.min(state.chartMin, curMse, bestMse);
-    state.chartMax = Math.max(state.chartMax, curMse, bestMse);
-  }
   renderChart();
 }
 
