@@ -424,9 +424,10 @@ function updateUi(force = false) {
     const last = state.chart[state.chart.length - 1];
     const rollingElapsed = (last.ts - first.ts) / 1000;
     const rollingIterations = last.iterations - first.iterations;
+    const rollingAccepted = Math.max(0, last.accepted - first.accepted);
     if (rollingElapsed > 0 && rollingIterations >= 0) {
       ips = Math.round(rollingIterations / rollingElapsed);
-      accRate = rollingIterations > 0 ? ((last.accepted - first.accepted) / rollingIterations) * 100 : 0;
+      accRate = rollingIterations > 0 ? (rollingAccepted / rollingIterations) * 100 : 0;
     }
   }
   const sim = Math.max(0, 100 * (1 - state.bestMse / (255 * 255)));
