@@ -344,7 +344,6 @@ function mutateRect(rect, settings) {
   } else {
     next.angle += rand(-0.2, 0.2) * s; // 0.2 * 0.05 = 0.01 rad (~0.57 deg min rotation)
   }
-  }
   return updateRectAabb(next);
 }
 
